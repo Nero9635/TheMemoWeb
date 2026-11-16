@@ -14,6 +14,7 @@ const KEYS = {
   calendar_hidden: 'calendarHidden',
   web_language: 'language',
   web_text_size: 'textSize',
+  web_writing_font: 'writingFont',
 };
 
 function settingsJson(includeApiKey) {

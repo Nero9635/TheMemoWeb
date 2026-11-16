@@ -10,7 +10,18 @@ import {
 import { BlockEditor, TYPE_LABEL } from './editor.js';
 import { findUrls, formatDateTime, formatTime, hostOf } from './util.js';
 
-export function Detail({ id }) {
+const lastMine = (memo) => memo.chat.map((c) => c.fromUser).lastIndexOf(true);
+
+/** 「3分前」「14:05」「11月3日」のような返信の時刻 */
+function formatAgo(ms) {
+  const min = Math.round((Date.now() - ms) / 60000);
+  if (min < 1) return t('justNow');
+  if (min < 60) return t('minAgo', { n: min });
+  const d = new Date(ms);
+  return d.toDateString() === new Date().toDateString() ? formatTime(ms) : formatDateTime(ms);
+}
+
+export function Detail({ id, reply = false }) {
   const st = S.state;
   const memo = S.getMemo(id);
   const [title, setTitle] = useState(memo?.title ?? '');
@@ -24,6 +35,18 @@ export function Detail({ id }) {
   const cameraInput = useRef();
   const editor = useRef({});
   const menu = usePostMenu();
+  const replyBox = useRef();
+  // 返信欄はふだん隠しておき、吹き出しボタンで出し入れする
+  const [showReply, setShowReply] = useState(reply);
+  const focusSoon = () => setTimeout(() => {
+    const el = replyBox.current;
+    if (!el) return;
+    el.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    el.querySelector('textarea')?.focus();
+  }, 60);
+  const focusReply = () => { setShowReply(true); focusSoon(); };
+  const toggleReply = () => { if (showReply) setShowReply(false); else focusReply(); };
+  useEffect(() => { if (reply) setTimeout(focusSoon, 300); }, []);
   if (!memo) return html`<div class="screen"><${NavBar} title="" /></div>`;
 
   const p = st.settings.persona;
@@ -53,6 +76,8 @@ export function Detail({ id }) {
         <${ProfileAvatar} size=${44} />
         <div class="flex"><div class="name-lg">${st.settings.profileName}</div>
           <div class="muted small-text">${memo.allDay ? t('diary') : `${formatTime(memo.createdAt)} · `}${memo.allDay ? '' : yearL(memo.createdAt)}</div></div>
+        ${memo.allDay && html`<button class=${`mood-chip ${memo.mood ? 'set' : ''}`} aria-label=${t('mood')} onClick=${() => menu.openMood(memo)}>
+          ${memo.mood ? html`<span class="mood-emoji">${S.moodEmoji(memo.mood)}</span>${S.moodLabel(memo.mood)}` : html`<span class="mood-emoji faint">☺︎</span>${t('mood')}`}</button>`}
         <${DateCapsule} date=${S.memoDate(memo)} small />
       </div>
       <input class="title-input" placeholder=${t('titleOptional')} aria-label=${t('titleOptional')} value=${title}
@@ -64,14 +89,27 @@ export function Detail({ id }) {
         ${urls.map((u) => html`<a class="link-chip" href=${u} target="_blank" rel="noopener">${Icon.link(14)} ${hostOf(u)}</a>`)}
         ${hashtags.map((h) => html`<button class="link-chip hashtag-chip" onClick=${() => S.open({ name: 'search', q: `#${h}` })}>#${h}</button>`)}
       </div>`}
-      <div class="pills pad">
+      ${memo.tags.length > 0 && html`<div class="pills pad">
         ${memo.tags.map((tg) => html`<${TagPill} name=${tg} onClick=${() => setTagSheet(true)} />`)}
-        <button class="chip" onClick=${() => setTagSheet(true)}>${Icon.tag(16)} ${memo.tags.length ? t('editTags') : t('addTag')}</button>
-      </div>
+      </div>`}
       ${(memo.place || memo.weather || memo.steps != null) && html`<div class="meta-line muted">${[memo.place, memo.weather, memo.steps != null ? t('steps', { n: memo.steps }) : ''].filter(Boolean).join(' · ')}</div>`}
 
+      <!-- 書くための道具: スクロールしても画面の下に残り、下までスクロールするとボタン列の上に止まる -->
+      <div class="tools-sticky">
+        ${words && html`<div class="word-row">${[...st.quickWords].sort((a, b) => b.uses - a.uses).map((w) => html`<button class="word"
+          onMouseDown=${(e) => e.preventDefault()} onClick=${() => { S.useWord(w.text); editor.current.insertText(w.text); }}>${w.text}</button>`)}</div>`}
+        <div class="toolbar glass">
+          <button class="tb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => setFormatMenu(true)}><span class="aa">Aa</span></button>
+          <button class="tb-btn" aria-label=${t('photo')} onClick=${() => photoInput.current.click()}>${Icon.photo(22)}</button>
+          <button class="tb-btn" aria-label=${t('camera')} onClick=${() => cameraInput.current.click()}>${Icon.camera(22)}</button>
+          <button class="tb-btn" aria-label=${t('tags')} onClick=${() => setTagSheet(true)}>${Icon.tag(20)}</button>
+          <span class="flex"></span>
+          <button class=${`capsule-btn ${words ? 'on' : ''}`} onMouseDown=${(e) => e.preventDefault()} onClick=${() => setWords(!words)}>${t('words')}</button>
+        </div>
+      </div>
+
       <div class="detail-actions">
-        <button class="act" aria-label=${t('talkWith', { name: p.name })} onClick=${() => S.open({ name: 'chat', id })}>${Icon.reply(20)}${memo.chat.length > 0 && html`<span>${memo.chat.length}</span>`}</button>
+        <button class=${`act ${showReply ? 'on' : ''}`} aria-label=${t('reply')} aria-expanded=${showReply} onClick=${toggleReply}>${Icon.reply(20)}${memo.chat.length > 0 && html`<span>${memo.chat.length}</span>`}</button>
         <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('commentOf', { name: p.name })} disabled=${!!st.busy} onClick=${() => S.commentOn(id)}>${busy === 'comment' ? html`<span class="spinner"></span>` : S.personaGlyph(p)}</button>
         <button class="act" aria-label=${t('polishAi')} disabled=${!!st.busy} onClick=${() => S.polish(id, false)}>${busy === 'polish' ? html`<span class="spinner"></span>` : Icon.sparkle(20)}</button>
         <button class="act" aria-label=${t('share')} onClick=${() => shareText(S.plainText(memo))}>${Icon.share(20)}</button>
@@ -82,7 +120,7 @@ export function Detail({ id }) {
         name=${memo.aiComment ? author.name : p.name} meta=${t('replyingTo', { name: st.settings.profileName })} busy=${busy === 'comment'} foldable=${memo.aiComment.length > 160}
         menu=${[
           { label: t('commentAgain'), disabled: !!st.busy, onClick: () => S.commentOn(id) },
-          { label: t('talkWith', { name: p.name }), onClick: () => S.open({ name: 'chat', id }) },
+          { label: t('reply'), onClick: focusReply },
           { label: t('copy'), onClick: () => copyText(memo.aiComment) },
           { label: t('remove'), danger: true, onClick: () => S.updateMemo(id, (m) => ({ ...m, aiComment: '' })) },
         ]}>${memo.aiComment && html`<p class="reply-text">${memo.aiComment}</p>`}</${ReplyItem}>`}
@@ -107,24 +145,27 @@ export function Detail({ id }) {
           { label: t('remove'), danger: true, onClick: () => S.updateMemo(id, (m) => ({ ...m, aiIdeas: '' })) },
         ]}><p class="reply-text">${memo.aiIdeas}</p></${ReplyItem}>`}
 
-      ${memo.chat.slice(-4).map((c) => html`<${ReplyItem} avatar=${c.fromUser ? html`<${ProfileAvatar} />` : html`<${PersonaAvatar} />`}
-        name=${c.fromUser ? st.settings.profileName : p.name} meta=${t('chat')}><p class="reply-text clamp6">${c.text}</p></${ReplyItem}>`)}
-      ${memo.chat.length > 0 && html`<button class="link-btn strong pad" onClick=${() => S.open({ name: 'chat', id })}>${t('continueChat', { n: memo.chat.length })}</button>`}
+      ${memo.chat.map((c, i) => html`<div class="reply-pair" key=${`${i}-${c.at ?? ''}`}>
+        <${ReplyItem} avatar=${c.fromUser ? html`<${ProfileAvatar} />` : html`<${PersonaAvatar} by=${c.by ?? null} icon=${c.icon ?? ''} />`}
+          name=${c.fromUser ? st.settings.profileName : S.authorOf(p, c.by ?? null, c.icon ?? '').name}
+          meta=${c.at ? formatAgo(c.at) : t('reply')}
+          menu=${c.fromUser ? [
+            { label: t('askToReply', { name: p.name }), disabled: !!st.busy, onClick: () => S.askReply(id, i) },
+            { label: t('copy'), onClick: () => copyText(c.text) },
+            { label: t('deleteReply'), danger: true, onClick: () => { if (confirm(t('confirmDeleteReply'))) S.deleteReply(id, i); } },
+          ] : [
+            { label: t('copy'), onClick: () => copyText(c.text) },
+            { label: t('deleteReply'), danger: true, onClick: () => { if (confirm(t('confirmDeleteReply'))) S.deleteReply(id, i); } },
+          ]}><p class="reply-text">${c.text}</p>
+        </${ReplyItem}>
+        ${busy === 'chat' && st.busy.index === i && html`<${ReplyItem} avatar=${html`<${PersonaAvatar} />`} name=${p.name} meta=${t('reply')} busy=${true}><span></span></${ReplyItem}>`}
+      </div>`)}
+      ${showReply && html`<div class="reply-compose" ref=${replyBox}>
+        <${ReplyComposer} id=${id} persona=${p} />
+      </div>`}
       <p class="footnote">${t('updated', { d: formatDateTime(memo.updatedAt) })}</p>
     </div>
 
-    ${words && html`<div class="word-row bar-top">${[...st.quickWords].sort((a, b) => b.uses - a.uses).map((w) => html`<button class="word"
-      onMouseDown=${(e) => e.preventDefault()} onClick=${() => { S.useWord(w.text); editor.current.insertText(w.text); }}>${w.text}</button>`)}</div>`}
-    <div class="toolbar-wrap">
-      <div class="toolbar glass">
-        <button class="tb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => setFormatMenu(true)}><span class="aa">Aa</span></button>
-        <button class="tb-btn" aria-label=${t('photo')} onClick=${() => photoInput.current.click()}>${Icon.photo(22)}</button>
-        <button class="tb-btn" aria-label=${t('camera')} onClick=${() => cameraInput.current.click()}>${Icon.camera(22)}</button>
-        <button class="tb-btn" aria-label=${t('tags')} onClick=${() => setTagSheet(true)}>${Icon.tag(20)}</button>
-        <span class="flex"></span>
-        <button class=${`capsule-btn ${words ? 'on' : ''}`} onMouseDown=${(e) => e.preventDefault()} onClick=${() => setWords(!words)}>${t('words')}</button>
-      </div>
-    </div>
     <input ref=${photoInput} type="file" accept="image/*" multiple hidden onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
     <input ref=${cameraInput} type="file" accept="image/*" capture="environment" hidden onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
 
@@ -143,7 +184,8 @@ export function Detail({ id }) {
     ]} />`}
     ${jungMenu && html`<${ActionSheet} title=${p.name} onClose=${() => setJungMenu(false)} items=${[
       { label: t('comment'), onClick: () => S.commentOn(id) },
-      { label: t('talkWith', { name: p.name }), onClick: () => S.open({ name: 'chat', id }) },
+      { label: t('askToReply', { name: p.name }), disabled: !memo.chat.some((c) => c.fromUser), onClick: () => S.askReply(id, lastMine(memo)) },
+      { label: t('reply'), onClick: focusReply },
     ]} />`}
     ${tagSheet && html`<${TagSheet} selected=${memo.tags} onChange=${(tg) => S.setMemoTags(id, tg)} onClose=${() => setTagSheet(false)} />`}
     ${st.suggestion?.memoId === id && html`<${Suggestion} s=${st.suggestion} onTitle=${(v) => setTitle(v)} onAppend=${append} />`}
@@ -183,37 +225,25 @@ export function NavBar({ title, right = null }) {
   </nav>`;
 }
 
-/** 人物との会話 */
-export function Chat({ id }) {
+/** 投稿の下の返信欄(X の「返信をポスト」)。自分の返信だけ / 返信して人物に聞く */
+function ReplyComposer({ id, persona }) {
   const st = S.state;
-  const memo = S.getMemo(id);
-  const [input, setInput] = useState('');
-  const end = useRef();
-  const p = st.settings.persona;
-  const thinking = st.busy?.memoId === id && st.busy.task === 'chat';
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [memo?.chat.length, thinking]);
-  if (!memo) return html`<div class="screen"><${NavBar} title="" /></div>`;
-  const send = async () => {
-    const v = input.trim();
-    if (!v) return;
-    setInput('');
-    if (!(await S.sendChat(id, v))) setInput(v);
+  const [text, setText] = useState('');
+  const ready = text.trim() && !st.busy;
+  const post = (ask) => {
+    if (!text.trim()) return;
+    const v = text;
+    setText('');
+    S.addReply(id, v, ask);
   };
-  return html`<div class="screen">
-    <${NavBar} title=${html`<span class="nav-persona"><${PersonaAvatar} size=${26} /> ${p.name}</span>`}
-      right=${memo.chat.length > 0 && html`<button class="pill-btn glass" disabled=${thinking} onClick=${() => { if (confirm(t('confirmClearChat'))) S.updateMemo(id, (m) => ({ ...m, chat: [] })); }}>${t('clear')}</button>`} />
-    <div class="scroll chat">
-      ${memo.chat.length === 0 && !thinking && html`<p class="empty pre">${t('chatEmpty', { name: p.name })}</p>`}
-      ${memo.chat.map((c) => html`<div class=${`bubble ${c.fromUser ? 'me' : 'them'}`}>${c.text}</div>`)}
-      ${thinking && html`<div class="bubble them"><span class="spinner"></span></div>`}
-      <div ref=${end}></div>
-    </div>
-    <div class="composer chat-composer">
-      <div class="composer-card glass">
-        <div class="compose-row">
-          <div class="field"><${AutoText} value=${input} onInput=${setInput} placeholder=${t('message')} maxRows=${4} class="field-input" onSubmit=${send} /></div>
-          <button class=${`round send ${input.trim() && !st.busy ? 'ready' : ''}`} aria-label=${t('send')} disabled=${!input.trim() || !!st.busy} onClick=${send}>${Icon.send()}</button>
-        </div>
+  return html`<div class="reply-composer">
+    <${ProfileAvatar} size=${36} />
+    <div class="flex">
+      <${AutoText} value=${text} onInput=${setText} placeholder=${t('replyPlaceholder')} maxRows=${8} class="reply-input" onSubmit=${() => post(false)} />
+      <div class="reply-buttons">
+        <button class="pill-btn ask-btn" disabled=${!ready} onClick=${() => post(true)}>
+          <span class="glyph">${S.personaGlyph(persona)}</span> ${t('replyAndAsk', { name: persona.name })}</button>
+        <button class="pill-btn post-btn" disabled=${!text.trim()} onClick=${() => post(false)}>${t('reply')}</button>
       </div>
     </div>
   </div>`;

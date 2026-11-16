@@ -137,10 +137,12 @@ export function dayCommentPrompt(p) {
     + '4〜6文、250文字程度で、段落は1つ。前置きや挨拶は書かないでください。' + PLAIN;
 }
 
-export function chatPrompt(memoText, p) {
-  return personaPrompt(p) + `ユーザーが書いたメモについて、${p.name}として対話します。`
-    + 'ユーザーは歩きながらスマホで読むことがあるので、返答は短く、要点から書いてください。'
-    + PLAIN + '\n\n--- メモ ---\n' + memoText;
+/** 投稿の下の返信欄での会話。先に書いたコメントがあれば、それも踏まえて答える */
+export function chatPrompt(memoText, p, earlierComment = '') {
+  return personaPrompt(p) + `ユーザーが書いた投稿(メモ)の下の返信欄で、${p.name}としてユーザーと会話します。`
+    + 'SNS の返信のように、ユーザーの最後の返信に直接答えてください。2〜4文程度で短く、要点から書いてください。'
+    + PLAIN + '\n\n--- 投稿 ---\n' + memoText
+    + (earlierComment.trim() ? `\n\n--- あなたが先に書いたコメント ---\n${earlierComment.trim()}` : '');
 }
 
 /** 応答に前後の説明やコードフェンスが付いていても、中の JSON だけを取り出す */

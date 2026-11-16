@@ -5,13 +5,12 @@ import * as B from './backup.js';
 import { useStore } from './ui.js';
 import { t } from './i18n.js';
 import { Home } from './home.js';
-import { Detail, Chat } from './detail.js';
+import { Detail } from './detail.js';
 import { Settings, Character, Search, Trash, QuickWords, Tags } from './settings.js';
 
 function Screen({ s }) {
   switch (s.name) {
-    case 'detail': return html`<${Detail} key=${s.id} id=${s.id} />`;
-    case 'chat': return html`<${Chat} id=${s.id} />`;
+    case 'detail': return html`<${Detail} key=${s.id} id=${s.id} reply=${!!s.reply} />`;
     case 'settings': return html`<${Settings} />`;
     case 'character': return html`<${Character} />`;
     case 'search': return html`<${Search} key=${s.q ?? ''} initial=${s.q ?? ''} />`;
@@ -29,7 +28,8 @@ function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = st.settings.theme;
     document.documentElement.style.setProperty('--ts', String(S.TEXT_SIZES[st.settings.textSize] ?? 1));
-  }, [st.settings.theme, st.settings.textSize]);
+    document.documentElement.dataset.font = st.settings.writingFont === 'serif' ? 'serif' : 'default';
+  }, [st.settings.theme, st.settings.textSize, st.settings.writingFont]);
 
   if (!st.ready) return html`<div class="loading"></div>`;
   const top = st.stack[st.stack.length - 1];
@@ -76,6 +76,16 @@ function fitViewport() {
 }
 
 fitViewport();
+
+/** 指2本での拡大縮小とダブルタップの拡大を止める(iOS は viewport の指定だけでは止まらない) */
+function noZoom() {
+  const stop = (e) => e.preventDefault();
+  document.addEventListener('gesturestart', stop, { passive: false });
+  document.addEventListener('gesturechange', stop, { passive: false });
+  document.addEventListener('gestureend', stop, { passive: false });
+  document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+}
+noZoom();
 history.replaceState({ depth: 1 }, '');
 render(html`<${App} />`, document.getElementById('app'));
 S.init();

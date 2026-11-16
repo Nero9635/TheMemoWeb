@@ -147,6 +147,32 @@ const D = {
   confirmClearChat: ['Clear this conversation?', '会話を消しますか?', '清除这段对话?'],
   chatEmpty: ['Talk with {name} about this memo.\nThe memo is sent to the AI only when you send a message.', 'このメモについて{name}と話してみましょう。\n送信した時だけ、メモの内容がAIに送られます。', '和 {name} 聊聊这条笔记。\n只有在发送消息时，笔记内容才会发送给 AI。'],
 
+  // ---- 日記・気分 ----
+  diaryLabel: ['DIARY', '日記', '日记'],
+  mood: ['Mood', '気分', '心情'],
+  howWasToday: ['How was your day?', '今日の気分は?', '今天心情如何?'],
+  moods: [
+    ['Great', 'Good', 'Okay', 'Low', 'Sad', 'Angry', 'Tired', 'Calm'],
+    ['最高', '良い', 'ふつう', 'いまいち', '悲しい', '怒り', '疲れた', '穏やか'],
+    ['很棒', '不错', '一般', '低落', '难过', '生气', '疲惫', '平静'],
+  ],
+  writeDiary: ['Write about today…', '今日のことを書く…', '写写今天…'],
+
+  // ---- 返信(自分のコメントと人物の会話) ----
+  replyPlaceholder: ['Post your reply', '返信を書く', '发表回复'],
+  reply: ['Reply', '返信', '回复'],
+  replyAndAsk: ['Reply & ask {name}', '返信して {name} に聞く', '回复并问 {name}'],
+  askToReply: ['Ask {name} to reply', '{name} に返事をもらう', '请 {name} 回复'],
+  deleteReply: ['Delete reply', '返信を削除', '删除回复'],
+  confirmDeleteReply: ['Delete this reply?', 'この返信を削除しますか?', '删除这条回复?'],
+  you: ['You', 'あなた', '你'],
+
+  justNow: ['now','たった今','刚刚'], minAgo: ['{n}m','{n}分前','{n}分钟前'],
+  // ---- フォント ----
+  writingFont: ['Writing font', '本文の書体', '正文字体'],
+  fontDefault: ['Default', '標準', '默认'],
+  fontSerif: ['Serif', '明朝', '衬线'],
+
   // ---- ブロック ----
   blockText: ['Text', 'テキスト', '文本'],
   blockH1: ['Heading 1', '見出し1', '标题 1'],

@@ -205,6 +205,7 @@ export function usePostMenu() {
   const [menu, setMenu] = useState(null); // {memo, preview}
   const [tagging, setTagging] = useState(null);
   const [timing, setTiming] = useState(null);
+  const [mooding, setMooding] = useState(null);
   const openMenu = (memo, preview = null) => setMenu({ memo, preview });
   const persona = S.state.settings.persona;
   const view = html`
@@ -221,8 +222,11 @@ export function usePostMenu() {
     ]} />`}
     ${tagging && html`<${TagSheet} selected=${tagging.tags} onChange=${(tg) => S.setMemoTags(tagging.id, tg)} onClose=${() => setTagging(null)} />`}
     ${timing && html`<${TimeSheet} memo=${timing} onClose=${() => setTiming(null)} />`}
+    ${mooding && html`<${ActionSheet} title=${t('howWasToday')} onClose=${() => setMooding(null)} items=${S.MOODS.map(([k, e], i) => ({
+      label: `${e}  ${t('moods')[i]}${S.getMemo(mooding)?.mood === k ? '  ✓' : ''}`, onClick: () => S.setMood(mooding, k),
+    }))} />`}
   `;
-  return { openMenu, openTags: setTagging, view };
+  return { openMenu, openTags: setTagging, openMood: (memo) => setMooding(memo.id), view };
 }
 
 /** 長押し(0.5秒)を見分ける。指が動いたらやめる */

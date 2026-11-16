@@ -2,7 +2,7 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import * as S from './store.js';
 import { Icon } from './icons.js';
-import { t, formatMonthL, weekdayHeaders, formatMonthShortL } from './i18n.js';
+import { t, locale, formatMonthL, weekdayHeaders, formatMonthShortL } from './i18n.js';
 import {
   Img, ProfileAvatar, PersonaAvatar, AiAvatar, DateCapsule, TagPill, AutoText, ActionSheet,
   TagSheet, usePostMenu, longPress, shareText, copyText, ReplyItem, tagColor, Linkified,
@@ -38,7 +38,7 @@ function dayInfo(memos, notes) {
     const imgs = S.memoImages(m);
     d.photos += imgs.length;
     if (!d.firstPhoto && imgs.length) d.firstPhoto = imgs[0];
-    if (m.allDay) d.diary = true;
+    if (m.allDay) { d.diary = true; if (m.mood) d.mood = m.mood; }
     m.tags.forEach((tg) => { if (!d.tags.includes(tg)) d.tags.push(tg); });
   }
   for (const k of Object.keys(notes)) {
@@ -247,7 +247,7 @@ function WeekStrip({ week, today, selected, info, onPick, onPrev, onNext, onExpa
         aria-label=${dayLabel(date, d)} aria-current=${date === today ? 'date' : undefined} onClick=${() => onPick(date)}>
         <span class="num">${Number(date.slice(8))}</span>
         <${Dots} d=${d} />
-        <span class="marks">${d?.diary && html`<i class="mark diary" aria-hidden="true"></i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
+        <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
       </button>`;
     })}
   </div>`;
@@ -282,7 +282,7 @@ function MonthGrid({ month, today, selected, info, onMonth, onPick }) {
             <${Dots} d=${d} />
             ${d?.posts > 1 && html`<span class="count">${d.posts}</span>`}
           </span>
-          <span class="marks">${d?.diary && html`<i class="mark diary" aria-hidden="true"></i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
+          <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
         </button>`;
       })}
     </div>
@@ -331,7 +331,7 @@ function DaySection({ day, today, menu }) {
       <button class="glass-icon small" aria-label=${t('aiForDay')} disabled=${busy} onClick=${() => setAiOpen(true)}>${busy ? html`<span class="spinner"></span>` : Icon.sparkle(16)}</button>
       <button class="pill-btn glass small" onClick=${() => { const d = S.diaryFor(day.date); S.open({ name: 'detail', id: d.id }); }}>${t('diary')}</button>
     </div>
-    ${day.posts.map((m) => html`<${Post} key=${m.id} memo=${m} menu=${menu} />`)}
+    ${day.posts.map((m) => (m.allDay ? html`<${DiaryCard} key=${m.id} memo=${m} menu=${menu} />` : html`<${Post} key=${m.id} memo=${m} menu=${menu} />`))}
     ${(note || busy) && html`<div class="day-review">
       ${(note?.summary || (busy && !st.dayBusy.jung)) && html`<${ReplyItem} avatar=${html`<${AiAvatar} />`} name=${t('daySummary')} meta=${formatDay(day.date)} line=${false}
         busy=${busy && !st.dayBusy.jung} foldable=${(note?.summary ?? '').length > 160}
@@ -396,12 +396,57 @@ function Post({ memo, menu }) {
       ${(memo.place || memo.weather || memo.steps != null) && memo.allDay && html`<div class="details muted">
         ${[memo.place, memo.weather, memo.steps != null ? t('steps', { n: memo.steps }) : ''].filter(Boolean).join(' · ')}</div>`}
       <div class="actions" onClick=${(e) => e.stopPropagation()}>
-        <button class="act" aria-label=${t('replies')} onClick=${open}>${Icon.reply()}${S.replyCount(memo) > 0 && html`<span>${S.replyCount(memo)}</span>`}</button>
+        <button class="act" aria-label=${t('reply')} onClick=${() => S.open({ name: 'detail', id: memo.id, reply: true })}>${Icon.reply()}${S.replyCount(memo) > 0 && html`<span>${S.replyCount(memo)}</span>`}</button>
         <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('ask', { name: persona.name })}
           onClick=${() => (memo.aiComment ? open() : S.commentOn(memo.id))}>${jungBusy ? html`<span class="spinner"></span>` : S.personaGlyph(persona)}</button>
         <button class="act" aria-label=${t('tags')} onClick=${() => menu.openTags(memo)}>${Icon.tag()}${memo.tags.length > 0 && html`<span>${memo.tags.length}</span>`}</button>
         <button class="act" aria-label=${t('share')} onClick=${() => shareText(S.plainText(memo))}>${Icon.share()}</button>
       </div>
+    </div>
+  </article>`;
+}
+
+/** タイムラインの日記。紙のような特別なカードに、気分・本文・写真を載せる */
+function DiaryCard({ memo, menu }) {
+  const st = S.state;
+  const [expanded, setExpanded] = useState(false);
+  const [overflow, setOverflow] = useState(false);
+  const bodyRef = useRef();
+  const images = S.memoImages(memo);
+  const persona = st.settings.persona;
+  const jungBusy = st.busy?.memoId === memo.id && st.busy.task === 'comment';
+  const open = () => S.open({ name: 'detail', id: memo.id });
+  const date = parseDateKey(S.memoDate(memo));
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (el && !expanded) setOverflow(el.scrollHeight > el.clientHeight + 2);
+  }, [memo.body, expanded]);
+  const details = [memo.place, memo.weather, memo.steps != null ? t('steps', { n: memo.steps }) : ''].filter(Boolean);
+
+  return html`<article class="diary-card" onClick=${open} ...${longPress(() => { haptic(); menu.openMenu(memo); })}>
+    <div class="diary-top">
+      <span class="diary-label">${t('diaryLabel')}</span>
+      <span class="diary-date">${date.toLocaleDateString(locale(), { weekday: 'long' })}</span>
+      <span class="flex"></span>
+      <button class=${`diary-mood ${memo.mood ? 'set' : ''}`} aria-label=${memo.mood ? `${t('mood')}: ${S.moodLabel(memo.mood)}` : t('mood')}
+        onClick=${(e) => { e.stopPropagation(); menu.openMood(memo); }}>
+        ${memo.mood ? html`<span class="mood-emoji">${S.moodEmoji(memo.mood)}</span>${S.moodLabel(memo.mood)}` : html`<span class="mood-emoji faint">☺︎</span>`}
+      </button>
+      <button class="icon-btn small muted" aria-label=${t('more')} onClick=${(e) => { e.stopPropagation(); menu.openMenu(memo); }}>${Icon.more()}</button>
+    </div>
+    ${memo.title.trim() && html`<div class="diary-title"><${Linkified} text=${memo.title} /></div>`}
+    ${memo.body.trim() && html`<div ref=${bodyRef} class=${`post-body diary-body ${expanded ? '' : 'folded'} ${overflow && !expanded ? 'fade' : ''}`}>
+      <${BlockView} memo=${memo} onToggle=${(id) => toggleTodo(memo, id)} /></div>`}
+    ${overflow && !expanded && html`<button class="link-btn strong show-more" onClick=${(e) => { e.stopPropagation(); setExpanded(true); }}>${t('showMore')}</button>`}
+    ${images.length > 0 && html`<${Media} names=${images} />`}
+    ${memo.tags.length > 0 && html`<div class="pills">${memo.tags.map((tg) => html`<${TagPill} name=${tg} onClick=${() => menu.openTags(memo)} />`)}</div>`}
+    ${details.length > 0 && html`<div class="diary-details muted">${details.join(' · ')}</div>`}
+    <div class="actions diary-actions" onClick=${(e) => e.stopPropagation()}>
+      <button class="act" aria-label=${t('reply')} onClick=${() => S.open({ name: 'detail', id: memo.id, reply: true })}>${Icon.reply()}${S.replyCount(memo) > 0 && html`<span>${S.replyCount(memo)}</span>`}</button>
+      <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('ask', { name: persona.name })}
+        onClick=${() => (memo.aiComment ? open() : S.commentOn(memo.id))}>${jungBusy ? html`<span class="spinner"></span>` : S.personaGlyph(persona)}</button>
+      <button class="act" aria-label=${t('tags')} onClick=${() => menu.openTags(memo)}>${Icon.tag()}${memo.tags.length > 0 && html`<span>${memo.tags.length}</span>`}</button>
+      <button class="act" aria-label=${t('share')} onClick=${() => shareText(S.plainText(memo))}>${Icon.share()}</button>
     </div>
   </article>`;
 }
@@ -424,12 +469,9 @@ function Composer({ onTyping, onPosted }) {
   const [tools, setTools] = useState(false);
   const [words, setWords] = useState(false);
   const [tagSheet, setTagSheet] = useState(false);
-  const [listening, setListening] = useState(false);
-  const recog = useRef(null);
   const photoInput = useRef();
   const cameraInput = useRef();
   const canSend = text.trim() || images.length;
-  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   const addFiles = async (files) => {
     for (const f of files) {
@@ -444,25 +486,6 @@ function Composer({ onTyping, onPosted }) {
     haptic();
     setText(''); setImages([]); setTags([]); setTools(false); setWords(false);
     onPosted();
-  };
-
-  // 音声入力(Safari の音声認識。使えない端末ではボタンを出さない)
-  const dictate = () => {
-    if (listening) { recog.current?.stop(); return; }
-    const r = new Speech();
-    r.lang = { en: 'en-US', ja: 'ja-JP', zh: 'zh-CN' }[st.settings.language] ?? 'en-US';
-    r.interimResults = false;
-    r.continuous = false;
-    const base = text;
-    r.onresult = (e) => {
-      const said = [...e.results].map((x) => x[0].transcript).join('');
-      setText(base ? `${base}${base.endsWith('\n') ? '' : ' '}${said}` : said);
-    };
-    r.onend = () => setListening(false);
-    r.onerror = () => setListening(false);
-    recog.current = r;
-    setListening(true);
-    r.start();
   };
 
   const insertWord = (w) => {
@@ -488,7 +511,6 @@ function Composer({ onTyping, onPosted }) {
         <button class=${`round ${tools ? 'on' : ''}`} aria-label=${tools ? t('closeTools') : t('addTools')} onClick=${() => setTools(!tools)}>${tools ? Icon.close() : Icon.plus()}</button>
         <div class="field">
           <${AutoText} value=${text} onInput=${setText} placeholder=${t('write')} label=${t('writeLabel')} maxRows=${6} class="field-input" onSubmit=${send} />
-          ${Speech && !text && html`<button class=${`icon-btn small ${listening ? 'listening' : 'muted'}`} aria-label=${listening ? t('stopDictate') : t('dictate')} onClick=${dictate}>${Icon.mic()}</button>`}
         </div>
         <button class=${`round send ${canSend ? 'ready' : ''}`} aria-label=${t('send')} disabled=${!canSend} onClick=${send}>${Icon.send()}</button>
       </div>

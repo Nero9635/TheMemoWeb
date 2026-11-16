@@ -53,7 +53,23 @@ const DEFAULT_SETTINGS = {
   persona: DEFAULT_PERSONA,
   language: 'en',
   textSize: 'm',
+  writingFont: 'default',
 };
+
+/** 日記の気分。key は保存用、emoji は表示用(名前は i18n の moods と同じ順番) */
+export const MOODS = [
+  ['great', '😄'], ['good', '🙂'], ['okay', '😐'], ['low', '😔'],
+  ['sad', '😢'], ['angry', '😠'], ['tired', '😴'], ['calm', '😌'],
+];
+
+export function moodEmoji(key) {
+  return MOODS.find(([k]) => k === key)?.[1] ?? '';
+}
+
+export function moodLabel(key) {
+  const i = MOODS.findIndex(([k]) => k === key);
+  return i < 0 ? '' : t('moods')[i];
+}
 
 /** 文字の大きさ(設定の S / M / L / XL) */
 export const TEXT_SIZES = { s: 0.9, m: 1, l: 1.15, xl: 1.3 };
@@ -132,7 +148,7 @@ export function memoDate(memo) {
 }
 
 export function isBlank(memo) {
-  return !memo.title.trim() && !memo.body.trim() && memoImages(memo).length === 0;
+  return !memo.title.trim() && !memo.body.trim() && memoImages(memo).length === 0 && !memo.mood;
 }
 
 export function replyCount(memo) {
@@ -144,7 +160,7 @@ function newMemo(fields) {
   return {
     id: uuid(), title: '', body: '', blocks: [], tags: [], createdAt: now, updatedAt: now, allDay: false,
     aiSummary: '', aiComment: '', aiCommentBy: '', aiCommentIcon: '', aiIdeas: '', chat: [],
-    place: '', weather: '', deletedAt: 0, ...fields,
+    place: '', weather: '', mood: '', deletedAt: 0, ...fields,
   };
 }
 
@@ -342,6 +358,11 @@ export function replaceText(id, text) {
 
 export function setMemoTags(id, tags) {
   updateMemo(id, (m) => ({ ...m, tags }));
+}
+
+/** 日記の気分。同じものをもう一度押すと外す */
+export function setMood(id, mood) {
+  updateMemo(id, (m) => ({ ...m, mood: m.mood === mood ? '' : mood }));
 }
 
 export function setMemoTime(id, ms) {
@@ -629,20 +650,46 @@ export function titleAndTags(id) {
   });
 }
 
-export async function sendChat(id, text) {
-  if (state.busy || needKey()) return false;
+// ---- 返信(X と同じく、投稿の下に自分のコメントと人物の返事が並ぶ) ----
+// memo.chat に {fromUser, text, at, by?, icon?} を順に入れる(Android 版の会話と同じ場所)
+
+/** 自分の返信を足す。ask なら続けて人物に返事をもらう */
+export async function addReply(id, text, ask = false) {
+  const msg = { fromUser: true, text: text.trim(), at: Date.now() };
+  if (!msg.text) return;
+  const memo = updateMemo(id, (m) => ({ ...m, chat: [...m.chat, msg] }));
+  if (ask) await askReply(id, memo.chat.length - 1);
+}
+
+export function deleteReply(id, index) {
+  updateMemo(id, (m) => ({ ...m, chat: m.chat.filter((_, i) => i !== index) }));
+}
+
+/**
+ * index 番目の(自分の)返信に、人物が返事をする。そこまでの会話と投稿、
+ * 人物が先に書いたコメントを踏まえて答え、返事はその返信のすぐ後ろに入る
+ */
+export async function askReply(id, index) {
+  if (state.busy || needKey()) return;
   const memo = getMemo(id);
-  const turns = [...memo.chat, { fromUser: true, text }];
-  updateMemo(id, (m) => ({ ...m, chat: turns }));
-  setState({ busy: { memoId: id, task: 'chat' } });
+  if (!memo) return;
+  const p = state.settings.persona;
+  // 同じ側の発言が続く時はまとめる(Gemini は交互の会話を前提にしている)
+  const turns = [];
+  for (const c of memo.chat.slice(0, index + 1)) {
+    const last = turns[turns.length - 1];
+    if (last && last.fromUser === c.fromUser) last.text += `\n\n${c.text}`;
+    else turns.push({ fromUser: c.fromUser, text: c.text });
+  }
+  if (!turns.length || !turns[turns.length - 1].fromUser) return;
+  setState({ busy: { memoId: id, task: 'chat', index } });
   try {
-    const reply = await ai.generate(state.settings.apiKey.trim(), state.settings.model, ai.chatPrompt(plainText(memo), state.settings.persona), turns);
-    updateMemo(id, (m) => ({ ...m, chat: [...m.chat, { fromUser: false, text: reply }] }));
-    return true;
+    const reply = await ai.generate(state.settings.apiKey.trim(), state.settings.model,
+      ai.chatPrompt(plainText(memo), p, memo.aiComment), turns);
+    const msg = { fromUser: false, text: reply.trim(), at: Date.now(), by: p.name, icon: personaGlyph(p) };
+    updateMemo(id, (m) => ({ ...m, chat: [...m.chat.slice(0, index + 1), msg, ...m.chat.slice(index + 1)] }));
   } catch (e) {
-    updateMemo(id, (m) => ({ ...m, chat: memo.chat }));
     say(e instanceof ai.AiError ? e.message : t('aiUnreadable'));
-    return false;
   } finally {
     setState({ busy: null });
   }

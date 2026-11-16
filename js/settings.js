@@ -77,6 +77,8 @@ export function Settings() {
           <${Segmented} label=${t('theme')} options=${[['system', t('system')], ['light', t('light')], ['dark', t('dark')]]} value=${s.theme} onChange=${(v) => S.updateSettings({ theme: v })} /></div>
         <div class="row"><span class="row-label">${t('textSize')}</span>
           <${Segmented} label=${t('textSize')} options=${['s', 'm', 'l', 'xl'].map((v, i) => [v, sizes[i]])} value=${s.textSize} onChange=${(v) => S.updateSettings({ textSize: v })} /></div>
+        <div class="row"><span class="row-label">${t('writingFont')}</span>
+          <${Segmented} label=${t('writingFont')} options=${[['default', t('fontDefault')], ['serif', html`<span class="serif-sample">${t('fontSerif')}</span>`]]} value=${s.writingFont} onChange=${(v) => S.updateSettings({ writingFont: v })} /></div>
       </div>
 
       <div class="group-title">AI</div>
@@ -107,7 +109,6 @@ export function Settings() {
 
       <div class="group-title">${t('data')}</div>
       <div class="group">
-        <${Row} icon=${Icon.share(16)} tint="#34C759" label=${t('backupMemos')} onClick=${() => B.backup(false)} />
         <${Row} icon=${Icon.share(16)} tint="#007AFF" label=${t('backupAll')} onClick=${() => setAskFull(true)} />
         <${Row} icon=${Icon.photo(16)} tint="#AF52DE" label=${t('restore')} onClick=${() => restoreInput.current.click()} />
         <${Row} icon=${Icon.clock(16)} tint="#FF9500" label=${t('archiveYear')} onClick=${() => setAskYear(true)} />
