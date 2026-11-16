@@ -5,7 +5,7 @@ import { Icon } from './icons.js';
 import { t, locale, formatMonthL, weekdayHeaders, formatMonthShortL } from './i18n.js';
 import {
   Img, ProfileAvatar, PersonaAvatar, AiAvatar, DateCapsule, TagPill, AutoText, ActionSheet,
-  TagSheet, usePostMenu, longPress, shareText, copyText, ReplyItem, tagColor, Linkified,
+  TagSheet, usePostMenu, longPress, shareText, copyText, ReplyItem, tagColor, Linkified, StarButton,
 } from './ui.js';
 import { BlockView, toggleTodo } from './editor.js';
 import { addDays, dateKey, formatDay, formatTime, hostOf, findUrls, parseDateKey, todayKey, weekStartOf, haptic } from './util.js';
@@ -39,6 +39,7 @@ function dayInfo(memos, notes) {
     d.photos += imgs.length;
     if (!d.firstPhoto && imgs.length) d.firstPhoto = imgs[0];
     if (m.allDay) { d.diary = true; if (m.mood) d.mood = m.mood; }
+    if (m.starred) d.starred = true;
     m.tags.forEach((tg) => { if (!d.tags.includes(tg)) d.tags.push(tg); });
   }
   for (const k of Object.keys(notes)) {
@@ -235,6 +236,7 @@ function dayLabel(date, d) {
   const parts = [formatDay(date)];
   if (d?.posts) parts.push(d.posts === 1 ? t('onePost') : t('nPosts', { n: d.posts }));
   if (d?.diary) parts.push(t('hasDiary'));
+  if (d?.starred) parts.push(t('starred'));
   return parts.join(', ');
 }
 
@@ -247,7 +249,7 @@ function WeekStrip({ week, today, selected, info, onPick, onPrev, onNext, onExpa
         aria-label=${dayLabel(date, d)} aria-current=${date === today ? 'date' : undefined} onClick=${() => onPick(date)}>
         <span class="num">${Number(date.slice(8))}</span>
         <${Dots} d=${d} />
-        <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
+        <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${d?.starred && html`<i class="mark star" aria-hidden="true">★</i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
       </button>`;
     })}
   </div>`;
@@ -282,7 +284,7 @@ function MonthGrid({ month, today, selected, info, onMonth, onPick }) {
             <${Dots} d=${d} />
             ${d?.posts > 1 && html`<span class="count">${d.posts}</span>`}
           </span>
-          <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
+          <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${d?.starred && html`<i class="mark star" aria-hidden="true">★</i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
         </button>`;
       })}
     </div>
@@ -297,6 +299,7 @@ function SelectedDay({ date, info, note, onOpen }) {
       <${DateCapsule} date=${date} small />
       <span class="muted small-text">${d.posts ? t('dayDetail', { n: d.posts, p: d.photos }) : t('noPosts')}${d.diary ? ` · ${t('hasDiary')}` : ''}</span>
       <span class="flex"></span>
+      <button class="pill-btn glass small diary-btn" onClick=${() => { const m = S.diaryFor(date); S.open({ name: 'detail', id: m.id }); }}>${Icon.edit(15)} ${t('diary')}</button>
       ${(d.posts || note) && html`<button class="pill-btn glass small" onClick=${onOpen}>${t('open')}</button>`}
     </div>
     ${d.tags.length > 0 && html`<div class="pills">${d.tags.slice(0, 6).map((tg) => html`<${TagPill} name=${tg} />`)}</div>`}
@@ -363,6 +366,7 @@ function Post({ memo, menu }) {
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
   const bodyRef = useRef();
+  const cardRef = useRef();
   const images = S.memoImages(memo);
   const urls = findUrls(memo.body);
   const persona = st.settings.persona;
@@ -376,19 +380,20 @@ function Post({ memo, menu }) {
     <div class="post-head"><strong>${st.settings.profileName}</strong><span class="muted"> · ${formatTime(memo.createdAt)}</span></div>
     <p class="post-body clamp4">${memo.body}</p></div></div>`;
 
-  return html`<article class="post" onClick=${open} ...${longPress(() => { haptic(); menu.openMenu(memo, preview); })}>
+  return html`<article class=${`post ${memo.starred ? 'is-starred' : ''}`} ref=${cardRef} onClick=${open} ...${longPress(() => { haptic(); menu.openMenu(memo, preview); })}>
     <${ProfileAvatar} />
     <div class="post-main">
       <div class="post-head">
         <strong class="ellipsis">${st.settings.profileName}</strong>
         <span class="muted"> · ${memo.allDay ? t('diary') : formatTime(memo.createdAt)}</span>
+        ${memo.starred && html`<span class="head-star" aria-label=${t('starred')}>★</span>`}
         <span class="flex"></span>
         <button class="icon-btn small muted" aria-label=${t('more')} onClick=${(e) => { e.stopPropagation(); menu.openMenu(memo); }}>${Icon.more()}</button>
       </div>
       ${memo.title.trim() && html`<div class="post-title"><${Linkified} text=${memo.title} /></div>`}
       ${memo.body.trim() && html`<div ref=${bodyRef} class=${`post-body ${expanded ? '' : 'folded'} ${overflow && !expanded ? 'fade' : ''}`}>
         <${BlockView} memo=${memo} onToggle=${(id) => toggleTodo(memo, id)} /></div>`}
-      ${overflow && !expanded && html`<button class="link-btn strong show-more" onClick=${(e) => { e.stopPropagation(); setExpanded(true); }}>${t('showMore')}</button>`}
+      <${FoldButton} overflow=${overflow} expanded=${expanded} setExpanded=${setExpanded} cardRef=${cardRef} />
       ${images.length > 0 && html`<${Media} names=${images} />`}
       ${urls.slice(0, 1).map((u) => html`<a class="link-card" href=${u} target="_blank" rel="noopener" onClick=${(e) => e.stopPropagation()}>
         <span class="link-host">${Icon.link()} ${hostOf(u)}</span></a>`)}
@@ -400,6 +405,7 @@ function Post({ memo, menu }) {
         <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('ask', { name: persona.name })}
           onClick=${() => (memo.aiComment ? open() : S.commentOn(memo.id))}>${jungBusy ? html`<span class="spinner"></span>` : S.personaGlyph(persona)}</button>
         <button class="act" aria-label=${t('tags')} onClick=${() => menu.openTags(memo)}>${Icon.tag()}${memo.tags.length > 0 && html`<span>${memo.tags.length}</span>`}</button>
+        <${StarButton} memo=${memo} />
         <button class="act" aria-label=${t('share')} onClick=${() => shareText(S.plainText(memo))}>${Icon.share()}</button>
       </div>
     </div>
@@ -412,6 +418,7 @@ function DiaryCard({ memo, menu }) {
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
   const bodyRef = useRef();
+  const cardRef = useRef();
   const images = S.memoImages(memo);
   const persona = st.settings.persona;
   const jungBusy = st.busy?.memoId === memo.id && st.busy.task === 'comment';
@@ -423,10 +430,11 @@ function DiaryCard({ memo, menu }) {
   }, [memo.body, expanded]);
   const details = [memo.place, memo.weather, memo.steps != null ? t('steps', { n: memo.steps }) : ''].filter(Boolean);
 
-  return html`<article class="diary-card" onClick=${open} ...${longPress(() => { haptic(); menu.openMenu(memo); })}>
+  return html`<article class=${`diary-card ${memo.starred ? 'is-starred' : ''}`} ref=${cardRef} onClick=${open} ...${longPress(() => { haptic(); menu.openMenu(memo); })}>
     <div class="diary-top">
       <span class="diary-label">${t('diaryLabel')}</span>
       <span class="diary-date">${date.toLocaleDateString(locale(), { weekday: 'long' })}</span>
+      ${memo.starred && html`<span class="head-star" aria-label=${t('starred')}>★</span>`}
       <span class="flex"></span>
       <button class=${`diary-mood ${memo.mood ? 'set' : ''}`} aria-label=${memo.mood ? `${t('mood')}: ${S.moodLabel(memo.mood)}` : t('mood')}
         onClick=${(e) => { e.stopPropagation(); menu.openMood(memo); }}>
@@ -437,7 +445,7 @@ function DiaryCard({ memo, menu }) {
     ${memo.title.trim() && html`<div class="diary-title"><${Linkified} text=${memo.title} /></div>`}
     ${memo.body.trim() && html`<div ref=${bodyRef} class=${`post-body diary-body ${expanded ? '' : 'folded'} ${overflow && !expanded ? 'fade' : ''}`}>
       <${BlockView} memo=${memo} onToggle=${(id) => toggleTodo(memo, id)} /></div>`}
-    ${overflow && !expanded && html`<button class="link-btn strong show-more" onClick=${(e) => { e.stopPropagation(); setExpanded(true); }}>${t('showMore')}</button>`}
+    <${FoldButton} overflow=${overflow} expanded=${expanded} setExpanded=${setExpanded} cardRef=${cardRef} />
     ${images.length > 0 && html`<${Media} names=${images} />`}
     ${memo.tags.length > 0 && html`<div class="pills">${memo.tags.map((tg) => html`<${TagPill} name=${tg} onClick=${() => menu.openTags(memo)} />`)}</div>`}
     ${details.length > 0 && html`<div class="diary-details muted">${details.join(' · ')}</div>`}
@@ -446,9 +454,31 @@ function DiaryCard({ memo, menu }) {
       <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('ask', { name: persona.name })}
         onClick=${() => (memo.aiComment ? open() : S.commentOn(memo.id))}>${jungBusy ? html`<span class="spinner"></span>` : S.personaGlyph(persona)}</button>
       <button class="act" aria-label=${t('tags')} onClick=${() => menu.openTags(memo)}>${Icon.tag()}${memo.tags.length > 0 && html`<span>${memo.tags.length}</span>`}</button>
+      <${StarButton} memo=${memo} />
       <button class="act" aria-label=${t('share')} onClick=${() => shareText(S.plainText(memo))}>${Icon.share()}</button>
     </div>
   </article>`;
+}
+
+/**
+ * 長い本文の「もっと見る」と「たたむ」。たたんだ時に投稿の頭が画面の上に隠れていたら、頭まで戻す
+ */
+function FoldButton({ overflow, expanded, setExpanded, cardRef }) {
+  if (!overflow) return null;
+  const fold = (e) => {
+    e.stopPropagation();
+    setExpanded(false);
+    requestAnimationFrame(() => {
+      const el = cardRef.current;
+      const feed = el?.closest('.feed');
+      if (!el || !feed) return;
+      const top = el.getBoundingClientRect().top - feed.getBoundingClientRect().top;
+      if (top < 0) feed.scrollTop += top - 8;
+    });
+  };
+  return expanded
+    ? html`<button class="link-btn strong show-more show-less" onClick=${fold}>${Icon.chevronUp(12)} ${t('showLess')}</button>`
+    : html`<button class="link-btn strong show-more" onClick=${(e) => { e.stopPropagation(); setExpanded(true); }}>${t('showMore')}</button>`;
 }
 
 /** 写真: 1枚は大きく、2枚は横、3枚以上は2×2(5枚目から「+n」) */

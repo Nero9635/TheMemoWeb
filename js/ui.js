@@ -3,7 +3,7 @@ import { html, useEffect, useRef, useState, useReducer, useLayoutEffect } from '
 import * as S from './store.js';
 import { Icon } from './icons.js';
 import { t } from './i18n.js';
-import { formatDay, weekdayColor, weekdayTextColor, splitLinks, tagStyle, dateKey, TAG_COLORS } from './util.js';
+import { formatDay, formatTime, formatDateTime, weekdayColor, weekdayTextColor, splitLinks, tagStyle, dateKey, TAG_COLORS } from './util.js';
 
 /** 状態が変わったら描き直す */
 export function useStore() {
@@ -69,8 +69,18 @@ export function Linkified({ text }) {
   });
 }
 
-export function DateCapsule({ date, small = false }) {
-  return html`<span class=${`capsule ${small ? 'small' : ''}`} style=${`background:${weekdayColor(date)};color:${weekdayTextColor(date)}`}>${formatDay(date)}</span>`;
+export function DateCapsule({ date, small = false, time = '', onClick = null, label = '' }) {
+  const style = `background:${weekdayColor(date)};color:${weekdayTextColor(date)}`;
+  const text = time ? html`${formatDay(date)}<span class="capsule-time">${time}</span>` : formatDay(date);
+  if (onClick) return html`<button class=${`capsule capsule-btn-date ${small ? 'small' : ''}`} style=${style} aria-label=${label} onClick=${onClick}>${text}</button>`;
+  return html`<span class=${`capsule ${small ? 'small' : ''}`} style=${style}>${text}</span>`;
+}
+
+/** 星(お気に入り)のボタン */
+export function StarButton({ memo, size = 20, class: cls = 'act' }) {
+  return html`<button class=${`${cls} star-act ${memo.starred ? 'starred' : ''}`} aria-pressed=${memo.starred}
+    aria-label=${memo.starred ? t('unstar') : t('star')} onClick=${(e) => { e.stopPropagation(); S.toggleStar(memo.id); }}>
+    ${memo.starred ? Icon.starFill(size) : Icon.star(size)}</button>`;
 }
 
 export function TagPill({ name, onClick }) {
@@ -160,15 +170,18 @@ export function TagSheet({ selected, onChange, onClose }) {
   };
   return html`<${Sheet} onClose=${onClose} label=${t('tags')}>
     <div class="sheet-head"><span class="sheet-title">${t('tags')}</span><button class="link-btn strong" onClick=${onClose}>${t('done')}</button></div>
-    <div class="group">
-      ${names.map((n) => html`<button class="row" onClick=${() => toggle(n)}>
-        <span class="tag-dot" style=${`background:${tagColor(n)}`}></span><span class="row-label">${n}</span>
-        ${!S.isListedTag(n) && html`<span class="row-value small-text">${t('notInList')}</span>`}
-        ${sel.includes(n) && html`<span class="accent">${Icon.check()}</span>`}
-      </button>`)}
-      <form class="row" onSubmit=${(e) => { e.preventDefault(); add(); }}>
-        <input class="row-input" placeholder=${t('addTagToList')} aria-label=${t('newTag')} value=${name} onInput=${(e) => setName(e.target.value)} />
-        <button type="submit" class="link-btn" disabled=${!name.trim()}>${t('add')}</button>
+    <div class="tag-cloud" role="group" aria-label=${t('tags')}>
+      ${names.map((n) => {
+        const on = sel.includes(n);
+        const c = tagColor(n);
+        return html`<button class=${`tag-cap ${on ? 'on' : ''} ${S.isListedTag(n) ? '' : 'unlisted'}`} aria-pressed=${on}
+          style=${on ? `${tagStyle(S.tagInfo(n))};border-color:${c}` : `--dot:${c}`} title=${S.isListedTag(n) ? '' : t('notInList')} onClick=${() => toggle(n)}>
+          ${on ? html`<span class="tag-cap-check">${Icon.check(14)}</span>` : html`<span class="tag-cap-dot"></span>`}${n}</button>`;
+      })}
+      <form class="tag-cap tag-cap-new" onSubmit=${(e) => { e.preventDefault(); add(); }}>
+        <span class="tag-cap-plus">${Icon.plus(14)}</span>
+        <input placeholder=${t('newTag')} aria-label=${t('addTagToList')} value=${name} onInput=${(e) => setName(e.target.value)} enterkeyhint="done" />
+        ${name.trim() && html`<button type="submit" class="tag-cap-add">${t('add')}</button>`}
       </form>
     </div>
     <p class="hint">${t('tagSheetHint')}</p>
@@ -206,17 +219,19 @@ export function usePostMenu() {
   const [tagging, setTagging] = useState(null);
   const [timing, setTiming] = useState(null);
   const [mooding, setMooding] = useState(null);
+  const [history, setHistory] = useState(null);
   const openMenu = (memo, preview = null) => setMenu({ memo, preview });
   const persona = S.state.settings.persona;
   const view = html`
     ${menu && html`<${ActionSheet} preview=${menu.preview} onClose=${() => setMenu(null)} items=${[
       { label: t('edit'), icon: Icon.edit(), onClick: () => S.open({ name: 'detail', id: menu.memo.id }) },
-      { label: menu.memo.allDay ? t('changeDate') : t('changeTime'), icon: Icon.clock(), onClick: () => setTiming(menu.memo) },
+      { label: menu.memo.starred ? t('unstar') : t('star'), icon: menu.memo.starred ? Icon.starFill(20) : Icon.star(20), onClick: () => S.toggleStar(menu.memo.id) },
       { label: t('tags'), icon: Icon.tag(20), onClick: () => setTagging(menu.memo) },
       { label: t('ask', { name: persona.name }), icon: html`<span class="glyph">${S.personaGlyph(persona)}</span>`, disabled: !!S.state.busy, onClick: () => S.commentOn(menu.memo.id) },
       { divider: true },
       { label: t('copyText'), icon: Icon.copy(), onClick: () => copyText(S.plainText(menu.memo)) },
       { label: t('share'), icon: Icon.share(20), onClick: () => shareText(S.plainText(menu.memo)) },
+      S.versionsOf(menu.memo.id).length > 0 && { label: t('versionHistory'), icon: Icon.clock(), onClick: () => setHistory(menu.memo.id) },
       { divider: true },
       { label: t('delete'), icon: Icon.trash(), danger: true, onClick: () => { if (confirm(t('confirmTrash'))) S.trashMemo(menu.memo.id); } },
     ]} />`}
@@ -225,8 +240,9 @@ export function usePostMenu() {
     ${mooding && html`<${ActionSheet} title=${t('howWasToday')} onClose=${() => setMooding(null)} items=${S.MOODS.map(([k, e], i) => ({
       label: `${e}  ${t('moods')[i]}${S.getMemo(mooding)?.mood === k ? '  ✓' : ''}`, onClick: () => S.setMood(mooding, k),
     }))} />`}
+    ${history && html`<${VersionSheet} id=${history} onClose=${() => setHistory(null)} />`}
   `;
-  return { openMenu, openTags: setTagging, openMood: (memo) => setMooding(memo.id), view };
+  return { openMenu, openTags: setTagging, openMood: (memo) => setMooding(memo.id), openTime: setTiming, view };
 }
 
 /** 長押し(0.5秒)を見分ける。指が動いたらやめる */
@@ -283,4 +299,30 @@ export function ReplyItem({ avatar, name, meta, busy = false, menu = null, child
 /** iOS 風の丸いガラスのボタン(戻る・閉じるなど) */
 export function GlassButton({ label, onClick, children, disabled = false, class: cls = '' }) {
   return html`<button class=${`glass-btn ${cls}`} aria-label=${label} disabled=${disabled} onClick=${onClick}>${children}</button>`;
+}
+
+/** 以前の版の一覧。押すと中身を見られ、その版に戻せる */
+export function VersionSheet({ id, onClose }) {
+  const list = S.versionsOf(id);
+  const [open, setOpen] = useState(null);
+  const restore = (v) => {
+    if (!confirm(t('confirmRestoreVersion', { d: formatDateTime(v.at) }))) return;
+    S.restoreVersion(id, v.at);
+    onClose();
+  };
+  return html`<${Sheet} onClose=${onClose} label=${t('versionHistory')}>
+    <div class="sheet-head"><span class="sheet-title">${t('versionHistory')}</span><button class="link-btn strong" onClick=${onClose}>${t('done')}</button></div>
+    <p class="hint">${t('versionHint')}</p>
+    ${list.length === 0 && html`<p class="empty">${t('noVersions')}</p>`}
+    <div class="group">
+      ${list.map((v) => html`<div class="version-row">
+        <button class="version-main" onClick=${() => setOpen(open === v.at ? null : v.at)} aria-expanded=${open === v.at}>
+          <div class="small-text muted">${formatDateTime(v.at)}</div>
+          ${v.title && html`<div class="version-title">${v.title}</div>`}
+          <div class=${open === v.at ? 'pre version-body' : 'clamp2 version-body'}>${v.body || t('photoLabel')}</div>
+        </button>
+        <button class="pill-btn small version-restore" onClick=${() => restore(v)}>${t('restore')}</button>
+      </div>`)}
+    </div>
+  </${Sheet}>`;
 }

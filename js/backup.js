@@ -1,7 +1,7 @@
 // バックアップ(zip)。中身の形は Android 版と同じなので、どちらのバックアップも読み込める
 /* global JSZip */
 import { db } from './db.js';
-import { state, normalizeMemo, memoImages, setState, say } from './store.js';
+import { state, normalizeMemo, memoImages, setState, say, autoSnapshot, flushSaves, updateSettings } from './store.js';
 import { todayKey } from './util.js';
 import { t } from './i18n.js';
 
@@ -15,6 +15,8 @@ const KEYS = {
   web_language: 'language',
   web_text_size: 'textSize',
   web_writing_font: 'writingFont',
+  web_line_spacing: 'lineSpacing',
+  web_editor_margin: 'editorMargin',
 };
 
 function settingsJson(includeApiKey) {
@@ -75,7 +77,10 @@ export async function backup(full = false, includeApiKey = false) {
   try {
     const blob = await buildZip({ full, includeApiKey });
     const name = `${full ? 'thememo-all' : 'thememo-backup'}-${todayKey()}.zip`;
-    if (await saveFile(blob, name)) say(full ? t('backedUpAll') : t('backedUp'));
+    if (await saveFile(blob, name)) {
+      if (full) updateSettings({ lastBackupAt: Date.now() });
+      say(full ? t('backedUpAll') : t('backedUp'));
+    }
   } catch {
     say(t('backupFailed'));
   }
@@ -99,6 +104,9 @@ export async function restore(file) {
     say(t('notBackup'));
     return;
   }
+  // 読み込む前の状態を控えておく
+  flushSaves();
+  await autoSnapshot('beforeImport').catch(() => {});
   // 写真
   const imageFiles = zip.file(/^images\/[^/]+$/);
   const existing = new Set(await db.imageNames());
@@ -175,6 +183,7 @@ export async function archiveYear(year) {
     if (count !== target.length) throw new Error('count mismatch');
     if (!(await saveFile(blob, `thememo-${year}.zip`))) return;
     if (!confirm(t('archiveConfirm', { y: year, n: target.length }))) return;
+    await autoSnapshot('beforeArchive').catch(() => {});
     const ids = new Set(target.map((m) => m.id));
     state.memos = state.memos.filter((m) => !ids.has(m.id));
     for (const id of ids) await db.deleteMemo(id);

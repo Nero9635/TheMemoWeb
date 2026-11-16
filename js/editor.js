@@ -33,23 +33,67 @@ export function BlockEditor({ memo, focusRef }) {
   const [menuFor, setMenuFor] = useState(null); // 形式メニュー(写真・区切り線を押した時)
   const refs = useRef(new Map());
   const lastFocused = useRef(null);
+  // いちばん新しいブロックの並び。描き直す前に続けて操作しても、古い並びで上書きしないように
+  const live = useRef(blocks);
+  live.current = blocks;
+  // 日本語などの変換中は形式の自動変換をしない。変換が決まってから、変換前の中身と比べて判断する
+  const composing = useRef(null); // {id, text}
   const nums = numbers(blocks);
 
   // 外から(写真の追加・形式の変更・ワードの挿入)操作できるようにする
   const commit = (next, f = null) => {
+    live.current = next;
     setBlocks(next);
     S.setMemoBlocks(memo.id, next);
     if (f) setFocus(f);
   };
+  // 区切り線を入れる。カーソルの位置で分けて、上の文章も下の文章も必ず残す
+  const insertDivider = (cur) => {
+    const list = live.current;
+    const i = list.findIndex((b) => b.id === cur.id);
+    if (i < 0) return;
+    if (!TEXT_TYPES.includes(cur.type)) {
+      // 写真や区切り線を選んでいた時は、その下に入れる
+      const nb = S.block();
+      commit([...list.slice(0, i + 1), S.block('DIVIDER'), nb, ...list.slice(i + 1)], { id: nb.id, pos: 0 });
+      return;
+    }
+    const el = refs.current.get(cur.id);
+    const a = el && lastFocused.current === cur.id ? Math.min(el.selectionStart, cur.text.length) : cur.text.length;
+    const before = cur.text.slice(0, a).replace(/\n$/, '');
+    const after = cur.text.slice(a).replace(/^\n/, '');
+    if (!before && !after) {
+      // 空のブロックは区切り線に変え、下に書き続ける段落を用意する
+      const nb = S.block();
+      commit([...list.slice(0, i), S.block('DIVIDER'), nb, ...list.slice(i + 1)], { id: nb.id, pos: 0 });
+      return;
+    }
+    if (!before) {
+      // 行頭なら、区切り線を上に入れる
+      commit([...list.slice(0, i), S.block('DIVIDER'), { ...cur, text: after }, ...list.slice(i + 1)], { id: cur.id, pos: 0 });
+      return;
+    }
+    const rest = after ? S.block(LIST_TYPES.includes(cur.type) || cur.type === 'QUOTE' ? cur.type : 'PARAGRAPH', after) : S.block();
+    commit([...list.slice(0, i), { ...cur, text: before }, S.block('DIVIDER'), rest, ...list.slice(i + 1)], { id: rest.id, pos: 0 });
+  };
   focusRef.current = {
     blocks,
-    current: () => blocks.find((b) => b.id === lastFocused.current) ?? null,
+    current: () => live.current.find((b) => b.id === lastFocused.current) ?? null,
     setType: (type) => {
-      const cur = blocks.find((b) => b.id === lastFocused.current) ?? blocks[blocks.length - 1];
-      if (!cur || cur.type === 'IMAGE') return;
-      commit(blocks.map((b) => (b.id === cur.id ? retype(b, type) : b)), { id: cur.id, pos: cur.text.length });
+      const list = live.current;
+      const cur = list.find((b) => b.id === lastFocused.current) ?? list[list.length - 1];
+      if (!cur) return;
+      if (type === 'DIVIDER') { insertDivider(cur); return; }
+      if (cur.type === 'IMAGE') return;
+      if (cur.type === 'DIVIDER') {
+        // 区切り線を文字のブロックに変える時は、「---」を残さず空のブロックにする
+        commit(list.map((b) => (b.id === cur.id ? { ...b, type, text: '', checked: false } : b)), { id: cur.id, pos: 0 });
+        return;
+      }
+      commit(list.map((b) => (b.id === cur.id ? retype(b, type) : b)), { id: cur.id, pos: cur.text.length });
     },
     move: (step) => {
+      const blocks = live.current;
       const i = blocks.findIndex((b) => b.id === lastFocused.current);
       const j = i + step;
       if (i < 0 || j < 0 || j >= blocks.length) return;
@@ -58,12 +102,14 @@ export function BlockEditor({ memo, focusRef }) {
       commit(next, { id: blocks[i].id, pos: 0 });
     },
     removeCurrent: () => {
+      const blocks = live.current;
       const i = blocks.findIndex((b) => b.id === lastFocused.current);
       if (i < 0) return;
       const next = blocks.filter((_, k) => k !== i);
       commit(next.length ? next : [S.block()]);
     },
     insertImages: (names) => {
+      const blocks = live.current;
       const i = blocks.findIndex((b) => b.id === lastFocused.current);
       const at = i >= 0 ? i + 1 : blocks.length;
       const imgs = names.map((image) => S.block('IMAGE', '', { image }));
@@ -73,6 +119,7 @@ export function BlockEditor({ memo, focusRef }) {
       commit(next);
     },
     insertText: (word) => {
+      const blocks = live.current;
       const cur = blocks.find((b) => b.id === lastFocused.current && TEXT_TYPES.includes(b.type))
         ?? [...blocks].reverse().find((b) => TEXT_TYPES.includes(b.type));
       if (!cur) { commit([...blocks, S.block('PARAGRAPH', word)]); return; }
@@ -83,6 +130,7 @@ export function BlockEditor({ memo, focusRef }) {
       commit(blocks.map((b) => (b.id === cur.id ? { ...b, text } : b)), { id: cur.id, pos: a + word.length });
     },
     focusEnd: () => {
+      const blocks = live.current;
       const last = blocks[blocks.length - 1];
       if (last && TEXT_TYPES.includes(last.type)) setFocus({ id: last.id, pos: last.text.length });
       else commit([...blocks, S.block()], null);
@@ -101,13 +149,25 @@ export function BlockEditor({ memo, focusRef }) {
     setFocus(null);
   }, [focus]);
 
-  const update = (id, patch) => commit(blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  const update = (id, patch) => commit(live.current.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 
-  const onInput = (b, el) => {
+  const onInput = (b0, el, isComposing = false) => {
+    const blocks = live.current;
+    const cur = blocks.find((x) => x.id === b0.id);
+    if (!cur) return;
+    if (isComposing) {
+      // 変換中: 文字だけ保存して、変換前の中身を覚えておく
+      if (composing.current?.id !== cur.id) composing.current = { id: cur.id, text: cur.text };
+      update(cur.id, { text: el.value });
+      return;
+    }
+    // 変換が決まった直後は、変換前の中身と比べる
+    let b = cur;
+    if (composing.current?.id === cur.id) { b = { ...cur, text: composing.current.text }; composing.current = null; }
     const text = el.value;
     const caret = el.selectionStart;
     // 空のブロックで「/」→ 形式のメニュー
-    if (text === '/') { setSlash(b.id); update(b.id, { text }); return; }
+    if (text === '/' || text === '／') { setSlash(b.id); update(b.id, { text }); return; }
     if (slash === b.id && text !== '/') setSlash(null);
     // 行頭の記号で形式を変える(今打った行だけを見る)
     const lineStart = text.lastIndexOf('\n', caret - 1) + 1;
@@ -117,7 +177,7 @@ export function BlockEditor({ memo, focusRef }) {
     const before = text.slice(0, Math.max(0, lineStart - 1));
     const after = text.slice(lineEnd + 1);
     const hasAfter = lineEnd < text.length;
-    const i = blocks.indexOf(b);
+    const i = blocks.findIndex((x) => x.id === b.id);
     if (b.type === 'PARAGRAPH' || (b.type !== 'PARAGRAPH' && lineStart === 0 && typed.length <= 3)) {
       // 「---」(iPhone / iPad は「--」を「—」に変えるので「—-」も)
       if (/^(-{3}|—-)$/.test(line) && typed === line) {
@@ -155,11 +215,26 @@ export function BlockEditor({ memo, focusRef }) {
     update(b.id, { text });
   };
 
-  const onKeyDown = (b, e) => {
+  // 変換が決まった時(Safari は決まった後に input が来ないことがあるので、ここでも確かめる)
+  const onCompositionEnd = (b) => {
+    setTimeout(() => {
+      if (composing.current?.id !== b.id) return;
+      const el = refs.current.get(b.id);
+      if (el) onInput(b, el, false);
+      else composing.current = null;
+    }, 0);
+  };
+
+  const onKeyDown = (b0, e) => {
     const el = e.target;
-    const i = blocks.indexOf(b);
+    const blocks = live.current;
+    const b = blocks.find((x) => x.id === b0.id) ?? b0;
+    const i = blocks.findIndex((x) => x.id === b.id);
     const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
-    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.isComposing) {
+    // 変換を決める Return(Safari では keyCode 229)では何もしない
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      if (composing.current) return;
       const a = el.selectionStart;
       if (LIST_TYPES.includes(b.type) || b.type === 'HEADING1' || b.type === 'HEADING2') {
         e.preventDefault();
@@ -190,7 +265,15 @@ export function BlockEditor({ memo, focusRef }) {
       if (!prev) return;
       e.preventDefault();
       if (prev.type === 'DIVIDER') { commit(blocks.filter((x) => x.id !== prev.id), { id: b.id, pos: 0 }); return; }
-      if (prev.type === 'IMAGE') return;
+      if (prev.type === 'IMAGE') {
+        // 写真の下の空の段落は消して、写真の上の文章へ
+        if (b.text) return;
+        const above = [...blocks.slice(0, i)].reverse().find((x) => TEXT_TYPES.includes(x.type));
+        const next = blocks.filter((x) => x.id !== b.id);
+        if (!next.length || next[next.length - 1].type === 'IMAGE') return; // 写真の後ろに書ける場所を残す
+        commit(next, above ? { id: above.id, pos: above.text.length } : null);
+        return;
+      }
       const join = prev.text.length;
       commit([...blocks.slice(0, i - 1), { ...prev, text: prev.text + b.text }, ...blocks.slice(i + 1)], { id: prev.id, pos: join });
       return;
@@ -209,14 +292,19 @@ export function BlockEditor({ memo, focusRef }) {
   const pickSlash = (type) => {
     const id = slash;
     setSlash(null);
+    const list = live.current;
+    const cur = list.find((b) => b.id === id);
+    if (!cur) return;
+    // 「/」だけを消してから形式を変える(ほかの文字は消さない)
+    const text = cur.text === '/' || cur.text === '／' ? '' : cur.text;
     if (type === 'DIVIDER') {
-      // 区切り線にして、その下に書き続ける段落を用意する
-      const i = blocks.findIndex((b) => b.id === id);
+      if (text) { insertDivider({ ...cur, text }); return; }
+      const i = list.findIndex((b) => b.id === id);
       const nb = S.block();
-      commit([...blocks.slice(0, i), S.block('DIVIDER'), nb, ...blocks.slice(i + 1)], { id: nb.id, pos: 0 });
+      commit([...list.slice(0, i), S.block('DIVIDER'), nb, ...list.slice(i + 1)], { id: nb.id, pos: 0 });
       return;
     }
-    commit(blocks.map((b) => (b.id === id ? retype({ ...b, text: '' }, type) : b)), { id, pos: 0 });
+    commit(list.map((b) => (b.id === id ? retype({ ...b, text }, type) : b)), { id, pos: text.length });
   };
 
   return html`<div class="blocks">
@@ -232,7 +320,8 @@ export function BlockEditor({ memo, focusRef }) {
         placeholder=${blocks.length === 1 && !b.text ? t('whatsHappening') : b.type === 'HEADING1' ? t('blockH1') : b.type === 'HEADING2' ? t('blockH2') : ''}
         refFn=${(el) => { if (el) refs.current.set(b.id, el); else refs.current.delete(b.id); }}
         onFocus=${() => { lastFocused.current = b.id; }}
-        onInput=${(el) => onInput(b, el)} onKeyDown=${(e) => onKeyDown(b, e)} />`}
+        onInput=${(el, c) => onInput(b, el, c)} onKeyDown=${(e) => onKeyDown(b, e)}
+        onCompositionEnd=${() => onCompositionEnd(b)} />`}
       ${slash === b.id && html`<div class="slash-menu" role="menu" aria-label=${t('turnInto')}>
         ${S.BLOCK_TYPES.map((type) => html`<button role="menuitem" class="slash-item" onMouseDown=${(e) => e.preventDefault()} onClick=${() => pickSlash(type)}>
           <span class="slash-icon">${TYPE_ICON[type]}</span>${TYPE_LABEL()[type]}</button>`)}
@@ -253,7 +342,7 @@ function retype(b, type) {
 }
 
 /** ブロックの中の入力欄。中身に合わせて高さが伸びる */
-function BlockText({ block, placeholder, refFn, onFocus, onInput, onKeyDown }) {
+function BlockText({ block, placeholder, refFn, onFocus, onInput, onKeyDown, onCompositionEnd }) {
   const ref = useRef();
   useLayoutEffect(() => {
     const el = ref.current;
@@ -263,7 +352,8 @@ function BlockText({ block, placeholder, refFn, onFocus, onInput, onKeyDown }) {
   }, [block.text, block.type]);
   return html`<textarea ref=${(el) => { ref.current = el; refFn(el); }} class="blk-input" rows="1" value=${block.text}
     placeholder=${placeholder} aria-label=${TYPE_LABEL()[block.type]} autocapitalize="sentences"
-    onFocus=${onFocus} onInput=${(e) => onInput(e.target)} onKeyDown=${onKeyDown}></textarea>`;
+    onFocus=${onFocus} onInput=${(e) => onInput(e.target, !!e.isComposing)} onKeyDown=${onKeyDown}
+    oncompositionend=${onCompositionEnd}></textarea>`;
 }
 
 /**

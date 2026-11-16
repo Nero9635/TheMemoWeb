@@ -54,6 +54,9 @@ const DEFAULT_SETTINGS = {
   language: 'en',
   textSize: 'm',
   writingFont: 'default',
+  lineSpacing: 'm',
+  editorMargin: 'm',
+  lastBackupAt: 0,
 };
 
 /** 日記の気分。key は保存用、emoji は表示用(名前は i18n の moods と同じ順番) */
@@ -73,6 +76,9 @@ export function moodLabel(key) {
 
 /** 文字の大きさ(設定の S / M / L / XL) */
 export const TEXT_SIZES = { s: 0.9, m: 1, l: 1.15, xl: 1.3 };
+/** 編集画面の行の間隔と、左右の余白 */
+export const LINE_SPACINGS = { s: 1.4, m: 1.6, l: 1.9 };
+export const EDITOR_MARGINS = { s: 8, m: 16, l: 36 };
 
 const TRASH_DAYS = 30;
 
@@ -160,7 +166,7 @@ function newMemo(fields) {
   return {
     id: uuid(), title: '', body: '', blocks: [], tags: [], createdAt: now, updatedAt: now, allDay: false,
     aiSummary: '', aiComment: '', aiCommentBy: '', aiCommentIcon: '', aiIdeas: '', chat: [],
-    place: '', weather: '', mood: '', deletedAt: 0, ...fields,
+    place: '', weather: '', mood: '', starred: false, deletedAt: 0, ...fields,
   };
 }
 
@@ -171,6 +177,7 @@ export function normalizeMemo(m) {
   memo.blocks = (m.blocks ?? []).map((b) => ({ id: b.id ?? uuid(), type: b.type ?? 'PARAGRAPH', text: b.text ?? '', checked: !!b.checked, image: b.image ?? '', comment: b.comment ?? '' }));
   memo.tags = m.tags ?? [];
   memo.chat = m.chat ?? [];
+  memo.starred = !!m.starred;
   if (!memo.body && memo.blocks.length) memo.body = toPlainText(memo.blocks);
   return memo;
 }
@@ -234,8 +241,11 @@ export async function init() {
   if (!tags) db.set('tags', state.tags);
   state.quickWords = words ?? DEFAULT_WORDS[state.settings.language].map((text) => ({ text, uses: 0 }));
   state.dayNotes = notes ?? {};
+  versions = (await db.get('versions').catch(() => null)) ?? {};
   state.ready = true;
   emit();
+  // 1日1回、起動した時の全メモを控えておく(バグや誤操作で消えても戻せるように)
+  autoSnapshot('daily').catch(() => {});
   // ホーム画面に追加したアプリのデータは消されにくい。念のため長く残すよう頼む
   navigator.storage?.persist?.().catch(() => {});
 }
@@ -263,7 +273,11 @@ window.addEventListener('popstate', () => {
   // 何も書かなかったメモは残さない
   if (left.name === 'detail') {
     const memo = getMemo(left.id);
-    if (memo && isBlank(memo)) removeMemoNow(memo.id);
+    if (memo && isBlank(memo)) {
+      if (versions[memo.id]?.length) updateMemo(memo.id, (m) => ({ ...m, deletedAt: Date.now() }));
+      else removeMemoNow(memo.id);
+    }
+    endEdit();
   }
   emit();
 });
@@ -274,7 +288,17 @@ const saveTimers = new Map();
 function persist(memo, delay = 0) {
   clearTimeout(saveTimers.get(memo.id));
   if (!delay) { db.putMemo(memo); return; }
-  saveTimers.set(memo.id, setTimeout(() => db.putMemo(getMemo(memo.id) ?? memo), delay));
+  saveTimers.set(memo.id, setTimeout(() => { saveTimers.delete(memo.id); db.putMemo(getMemo(memo.id) ?? memo); }, delay));
+}
+
+/** まだ書き込んでいない変更を、すぐ端末に保存する(アプリを閉じる時など) */
+export function flushSaves() {
+  for (const [id, timer] of saveTimers) {
+    clearTimeout(timer);
+    const m = getMemo(id);
+    if (m) db.putMemo(m);
+  }
+  saveTimers.clear();
 }
 
 export function updateMemo(id, fn, delay = 0) {
@@ -330,15 +354,18 @@ export function newPostOn(key) {
 
 /** 詳細画面のブロックエディタからの保存(打つたびに呼ばれるので、書き込みは少し待ってまとめる) */
 export function setMemoBlocks(id, blocks) {
+  checkpoint(id);
   return updateMemo(id, (m) => ({ ...m, blocks, body: toPlainText(blocks) }), 400);
 }
 
 export function setMemoTitle(id, title) {
+  checkpoint(id);
   return updateMemo(id, (m) => ({ ...m, title }), 400);
 }
 
 /** 本文の最後に文章を足す(AI の文章を本文へ、など) */
 export function appendText(id, text) {
+  checkpoint(id);
   return updateMemo(id, (m) => {
     const last = m.blocks[m.blocks.length - 1];
     // 最後が空の段落なら、そこに入れる
@@ -350,6 +377,7 @@ export function appendText(id, text) {
 
 /** 本文を文章で置き換える。写真は残す */
 export function replaceText(id, text) {
+  checkpoint(id);
   return updateMemo(id, (m) => {
     const blocks = [...parseBlocks(text), ...m.blocks.filter((b) => b.type === 'IMAGE')];
     return { ...m, blocks, body: toPlainText(blocks) };
@@ -363,6 +391,11 @@ export function setMemoTags(id, tags) {
 /** 日記の気分。同じものをもう一度押すと外す */
 export function setMood(id, mood) {
   updateMemo(id, (m) => ({ ...m, mood: m.mood === mood ? '' : mood }));
+}
+
+/** 星を付ける / 外す */
+export function toggleStar(id) {
+  updateMemo(id, (m) => ({ ...m, starred: !m.starred }));
 }
 
 export function setMemoTime(id, ms) {
@@ -396,6 +429,7 @@ export async function deleteForever(id, list = state.memos) {
 }
 
 export async function emptyTrash() {
+  await autoSnapshot('beforeEmptyTrash');
   for (const m of trashMemos()) await deleteForever(m.id);
 }
 
@@ -752,4 +786,108 @@ export function saveReview() {
   const blocks = [...parseBlocks(r.text), block('PARAGRAPH', t('reviewTag'))];
   addMemo(newMemo({ title: t('reviewTitle', { label: r.label }), blocks, body: toPlainText(blocks) }));
   setState({ review: null, message: t('reviewSaved') });
+}
+
+// ---- 消えないための仕組み ----
+//
+// 1. 版の履歴: メモを開いて書き換え始めた時、書き換える前の中身を残す(1つのメモにつき 20 版まで)。
+//    「…」→「以前の版」から戻せる
+// 2. まるごとの控え: 1日1回(起動時)と、ゴミ箱を空にする・バックアップを読み込むなどの前に、
+//    全メモを端末の中に控える(最大 10 個)。設定 →「自動の控え」から戻せる
+// 3. 書き込み待ちの変更は、アプリを閉じる・切り替える時にすぐ保存する
+
+const MAX_VERSIONS = 20;
+const MAX_SNAPSHOTS = 10;
+let versions = {}; // {memoId: [{at, title, blocks, body}]} 新しい順
+let editing = null; // {id, original, saved}
+
+const contentOf = (m) => ({ title: m.title, blocks: m.blocks, body: m.body });
+const sameContent = (a, b) => a.title === b.title && JSON.stringify(a.blocks) === JSON.stringify(b.blocks);
+
+/** 編集画面を開いた時。まだ何も変えていないので、元の中身だけ覚えておく */
+export function beginEdit(id) {
+  const m = getMemo(id);
+  editing = m ? { id, original: contentOf(m), saved: false } : null;
+}
+
+export function endEdit() {
+  editing = null;
+}
+
+/** 最初に書き換える直前に、元の中身を版として保存する(1回の編集につき1つ) */
+function checkpoint(id) {
+  if (!editing || editing.id !== id || editing.saved) return;
+  editing.saved = true;
+  const o = editing.original;
+  if (!o.title.trim() && !o.body.trim() && !o.blocks.some((b) => b.type === 'IMAGE')) return;
+  pushVersion(id, o);
+}
+
+function pushVersion(id, content) {
+  const list = versions[id] ?? [];
+  if (list[0] && sameContent(list[0], content)) return;
+  versions = { ...versions, [id]: [{ at: Date.now(), ...JSON.parse(JSON.stringify(content)) }, ...list].slice(0, MAX_VERSIONS) };
+  db.set('versions', versions).catch(() => {});
+}
+
+export const versionsOf = (id) => versions[id] ?? [];
+
+/** 以前の版に戻す。今の中身も版として残すので、戻したことも取り消せる */
+export function restoreVersion(id, at) {
+  const v = versionsOf(id).find((x) => x.at === at);
+  const m = getMemo(id);
+  if (!v || !m) return;
+  pushVersion(id, contentOf(m));
+  const blocks = v.blocks.map((b) => ({ ...b }));
+  updateMemo(id, (x) => ({ ...x, title: v.title, blocks, body: toPlainText(blocks) }));
+  if (editing?.id === id) editing = { id, original: contentOf(getMemo(id)), saved: false };
+  setState({ editorRev: (state.editorRev ?? 0) + 1, message: t('versionRestored') });
+}
+
+/** 全メモの控えを作る。daily は1日1回だけ */
+export async function autoSnapshot(reason) {
+  const list = (await db.get('snapshots').catch(() => null)) ?? [];
+  if (reason === 'daily' && list.some((x) => x.reason === 'daily' && dateKey(x.at) === todayKey())) return;
+  if (!state.memos.length) return;
+  const snap = { at: Date.now(), reason, count: activeMemos().length, memos: JSON.parse(JSON.stringify(state.memos)), dayNotes: state.dayNotes };
+  // 古いものから消す。ただし毎日の控えを少なくとも 5 つは残す
+  let next = [snap, ...list];
+  while (next.length > MAX_SNAPSHOTS) {
+    const dailies = next.filter((x) => x.reason === 'daily').length;
+    const victim = [...next].reverse().find((x) => (dailies > 5 ? true : x.reason !== 'daily')) ?? next[next.length - 1];
+    next = next.filter((x) => x !== victim);
+  }
+  await db.set('snapshots', next);
+}
+
+/** 控えの一覧(中身は除いて、日時と件数だけ) */
+export async function listSnapshots() {
+  const list = (await db.get('snapshots').catch(() => null)) ?? [];
+  return list.map(({ at, reason, count }) => ({ at, reason, count }));
+}
+
+/**
+ * 控えから戻す。控えにあるメモはその時の中身に戻し、控えのあとに書いたメモはそのまま残す。
+ * 戻す前の状態も控えに入れるので、やり直せる
+ */
+export async function restoreSnapshot(at) {
+  const list = (await db.get('snapshots').catch(() => null)) ?? [];
+  const snap = list.find((x) => x.at === at);
+  if (!snap) return;
+  flushSaves();
+  await autoSnapshot('beforeRestore');
+  const byId = new Map(state.memos.map((m) => [m.id, m]));
+  const changed = [];
+  for (const raw of snap.memos) {
+    const m = normalizeMemo(raw);
+    const cur = byId.get(m.id);
+    if (cur && !sameContent(contentOf(cur), contentOf(m))) pushVersion(m.id, contentOf(cur));
+    if (!cur || JSON.stringify(cur) !== JSON.stringify(m)) { byId.set(m.id, m); changed.push(m); }
+  }
+  await db.putMemos(changed);
+  state.memos = [...byId.values()];
+  const notes = { ...(snap.dayNotes ?? {}), ...state.dayNotes };
+  state.dayNotes = notes;
+  await db.set('dayNotes', notes);
+  setState({ editorRev: (state.editorRev ?? 0) + 1, message: t('snapshotRestored', { n: changed.length }) });
 }

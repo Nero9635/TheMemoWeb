@@ -5,6 +5,8 @@ const svg = (size, body, fill = false) => html`<svg width=${size} height=${size}
   fill=${fill ? 'currentColor' : 'none'} stroke=${fill ? 'none' : 'currentColor'} stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
 export const Icon = {
+  star: (s = 22) => svg(s, html`<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>`),
+  starFill: (s = 22) => svg(s, html`<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>`, true),
   back: (s = 24) => svg(s, html`<path d="M15 5l-7 7 7 7" stroke-width="2.4"/>`),
   chevronDown: (s = 16) => svg(s, html`<path d="M6 9l6 6 6-6" stroke-width="2.4"/>`),
   chevronUp: (s = 16) => svg(s, html`<path d="M6 15l6-6 6 6" stroke-width="2.4"/>`),

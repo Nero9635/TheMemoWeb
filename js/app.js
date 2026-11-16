@@ -10,7 +10,8 @@ import { Settings, Character, Search, Trash, QuickWords, Tags } from './settings
 
 function Screen({ s }) {
   switch (s.name) {
-    case 'detail': return html`<${Detail} key=${s.id} id=${s.id} reply=${!!s.reply} />`;
+    // 以前の版や控えから戻した時は、作り直して新しい中身を見せる
+    case 'detail': return html`<${Detail} key=${`${s.id}:${S.state.editorRev ?? 0}`} id=${s.id} reply=${!!s.reply} />`;
     case 'settings': return html`<${Settings} />`;
     case 'character': return html`<${Character} />`;
     case 'search': return html`<${Search} key=${s.q ?? ''} initial=${s.q ?? ''} />`;
@@ -29,7 +30,9 @@ function App() {
     document.documentElement.dataset.theme = st.settings.theme;
     document.documentElement.style.setProperty('--ts', String(S.TEXT_SIZES[st.settings.textSize] ?? 1));
     document.documentElement.dataset.font = st.settings.writingFont === 'serif' ? 'serif' : 'default';
-  }, [st.settings.theme, st.settings.textSize, st.settings.writingFont]);
+    document.documentElement.style.setProperty('--ed-lh', String(S.LINE_SPACINGS[st.settings.lineSpacing] ?? 1.6));
+    document.documentElement.style.setProperty('--ed-side', `${S.EDITOR_MARGINS[st.settings.editorMargin] ?? 16}px`);
+  }, [st.settings.theme, st.settings.textSize, st.settings.writingFont, st.settings.lineSpacing, st.settings.editorMargin]);
 
   if (!st.ready) return html`<div class="loading"></div>`;
   const top = st.stack[st.stack.length - 1];
@@ -86,6 +89,10 @@ function noZoom() {
   document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 }
 noZoom();
+
+// アプリを閉じる・ほかのアプリに切り替える時は、書きかけの変更をすぐ保存する
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') S.flushSaves(); });
+window.addEventListener('pagehide', () => S.flushSaves());
 history.replaceState({ depth: 1 }, '');
 render(html`<${App} />`, document.getElementById('app'));
 S.init();

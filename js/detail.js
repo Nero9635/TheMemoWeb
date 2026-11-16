@@ -5,7 +5,7 @@ import { Icon } from './icons.js';
 import { t, yearL } from './i18n.js';
 import {
   ProfileAvatar, PersonaAvatar, AiAvatar, AutoText, ActionSheet, TagSheet, TagPill, DateCapsule,
-  usePostMenu, ReplyItem, copyText, shareText,
+  usePostMenu, ReplyItem, copyText, shareText, StarButton,
 } from './ui.js';
 import { BlockEditor, TYPE_LABEL } from './editor.js';
 import { findUrls, formatDateTime, formatTime, hostOf } from './util.js';
@@ -47,6 +47,8 @@ export function Detail({ id, reply = false }) {
   const focusReply = () => { setShowReply(true); focusSoon(); };
   const toggleReply = () => { if (showReply) setShowReply(false); else focusReply(); };
   useEffect(() => { if (reply) setTimeout(focusSoon, 300); }, []);
+  // 書き換え始めたら、元の中身を「以前の版」として残す
+  useEffect(() => { S.beginEdit(id); }, []);
   if (!memo) return html`<div class="screen"><${NavBar} title="" /></div>`;
 
   const p = st.settings.persona;
@@ -78,7 +80,8 @@ export function Detail({ id, reply = false }) {
           <div class="muted small-text">${memo.allDay ? t('diary') : `${formatTime(memo.createdAt)} · `}${memo.allDay ? '' : yearL(memo.createdAt)}</div></div>
         ${memo.allDay && html`<button class=${`mood-chip ${memo.mood ? 'set' : ''}`} aria-label=${t('mood')} onClick=${() => menu.openMood(memo)}>
           ${memo.mood ? html`<span class="mood-emoji">${S.moodEmoji(memo.mood)}</span>${S.moodLabel(memo.mood)}` : html`<span class="mood-emoji faint">☺︎</span>${t('mood')}`}</button>`}
-        <${DateCapsule} date=${S.memoDate(memo)} small />
+        <${DateCapsule} date=${S.memoDate(memo)} small time=${memo.allDay ? '' : formatTime(memo.createdAt)}
+          label=${memo.allDay ? t('changeDate') : t('changeTime')} onClick=${() => menu.openTime(memo)} />
       </div>
       <input class="title-input" placeholder=${t('titleOptional')} aria-label=${t('titleOptional')} value=${title}
         onInput=${(e) => { setTitle(e.target.value); S.setMemoTitle(id, e.target.value); }} />
@@ -112,6 +115,7 @@ export function Detail({ id, reply = false }) {
         <button class=${`act ${showReply ? 'on' : ''}`} aria-label=${t('reply')} aria-expanded=${showReply} onClick=${toggleReply}>${Icon.reply(20)}${memo.chat.length > 0 && html`<span>${memo.chat.length}</span>`}</button>
         <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('commentOf', { name: p.name })} disabled=${!!st.busy} onClick=${() => S.commentOn(id)}>${busy === 'comment' ? html`<span class="spinner"></span>` : S.personaGlyph(p)}</button>
         <button class="act" aria-label=${t('polishAi')} disabled=${!!st.busy} onClick=${() => S.polish(id, false)}>${busy === 'polish' ? html`<span class="spinner"></span>` : Icon.sparkle(20)}</button>
+        <${StarButton} memo=${memo} />
         <button class="act" aria-label=${t('share')} onClick=${() => shareText(S.plainText(memo))}>${Icon.share(20)}</button>
       </div>
       ${(busy === 'ideas' || busy === 'title') && html`<div class="pad muted"><div class="progress"><span></span></div>${busy === 'ideas' ? t('expanding') : t('findingTitle')}</div>`}

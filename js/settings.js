@@ -5,8 +5,8 @@ import * as B from './backup.js';
 import { listModels, DEFAULT_MODEL, AiError } from './ai.js';
 import { Icon } from './icons.js';
 import { NavBar } from './detail.js';
-import { ProfileAvatar, PersonaAvatar, ActionSheet, Linkified, TagPill } from './ui.js';
-import { formatDay, formatTime, TAG_COLORS } from './util.js';
+import { ProfileAvatar, PersonaAvatar, ActionSheet, Linkified, TagPill, Sheet } from './ui.js';
+import { formatDay, formatTime, formatDateTime, TAG_COLORS } from './util.js';
 import { t, LANGUAGES } from './i18n.js';
 
 function Row({ icon, tint, label, value = '', onClick, chevron = true }) {
@@ -31,6 +31,7 @@ export function Settings() {
   const [checking, setChecking] = useState(false);
   const [askFull, setAskFull] = useState(false);
   const [askYear, setAskYear] = useState(false);
+  const [snaps, setSnaps] = useState(false);
   const avatarInput = useRef();
   const restoreInput = useRef();
   // いま入っている版(sw.js の VERSION)。更新が届いたかの確認に使う
@@ -79,6 +80,11 @@ export function Settings() {
           <${Segmented} label=${t('textSize')} options=${['s', 'm', 'l', 'xl'].map((v, i) => [v, sizes[i]])} value=${s.textSize} onChange=${(v) => S.updateSettings({ textSize: v })} /></div>
         <div class="row"><span class="row-label">${t('writingFont')}</span>
           <${Segmented} label=${t('writingFont')} options=${[['default', t('fontDefault')], ['serif', html`<span class="serif-sample">${t('fontSerif')}</span>`]]} value=${s.writingFont} onChange=${(v) => S.updateSettings({ writingFont: v })} /></div>
+        <div class="row"><span class="row-label">${t('lineSpacing')}</span>
+          <${Segmented} label=${t('lineSpacing')} options=${[['s', t('spacingTight')], ['m', t('spacingNormal')], ['l', t('spacingLoose')]]} value=${s.lineSpacing} onChange=${(v) => S.updateSettings({ lineSpacing: v })} /></div>
+        <div class="row"><span class="row-label">${t('sideMargin')}</span>
+          <${Segmented} label=${t('sideMargin')} options=${[['s', t('marginNarrow')], ['m', t('marginNormal')], ['l', t('marginWide')]]} value=${s.editorMargin} onChange=${(v) => S.updateSettings({ editorMargin: v })} /></div>
+        <div class="spacing-preview" aria-hidden="true"><div class="spacing-sample">${t('spacingSample')}</div></div>
       </div>
 
       <div class="group-title">AI</div>
@@ -111,18 +117,48 @@ export function Settings() {
       <div class="group">
         <${Row} icon=${Icon.share(16)} tint="#007AFF" label=${t('backupAll')} onClick=${() => setAskFull(true)} />
         <${Row} icon=${Icon.photo(16)} tint="#AF52DE" label=${t('restore')} onClick=${() => restoreInput.current.click()} />
+        <${Row} icon=${Icon.clock(16)} tint="#34C759" label=${t('snapshots')} onClick=${() => setSnaps(true)} />
         <${Row} icon=${Icon.clock(16)} tint="#FF9500" label=${t('archiveYear')} onClick=${() => setAskYear(true)} />
         <${Row} icon=${Icon.trash(16)} tint="#FF3B30" label=${t('trash')} value=${String(S.trashMemos().length)} onClick=${() => S.open({ name: 'trash' })} />
       </div>
+      <p class=${`hint ${backupOld(s.lastBackupAt) ? 'warn-text' : ''}`}>${s.lastBackupAt ? t('lastBackup', { d: formatDateTime(s.lastBackupAt) }) : t('neverBackedUp')}
+        ${backupOld(s.lastBackupAt) ? ` ${t('backupReminder')}` : ''}</p>
       <p class="hint">${t('dataHint')}</p>
       <input ref=${restoreInput} type="file" accept=".zip,application/zip" hidden onChange=${(e) => { if (e.target.files[0]) B.restore(e.target.files[0]); e.target.value = ''; }} />
       <p class="footnote">The Memo for iPhone / iPad${version ? ` · ${t('version', { v: version })}` : ''}</p>
     </div>
 
     ${askFull && html`<${FullBackup} onClose=${() => setAskFull(false)} />`}
+    ${snaps && html`<${SnapshotSheet} onClose=${() => setSnaps(false)} />`}
     ${askYear && html`<${ActionSheet} title=${t('archiveTitle')} onClose=${() => setAskYear(false)}
       items=${B.yearsWithMemos().map(([y, n]) => ({ label: t('yearItem', { y, n }) + (y === new Date().getFullYear() ? t('thisYear') : ''), onClick: () => B.archiveYear(y) }))} />`}
   </div>`;
+}
+
+/** 最後のバックアップから 14 日以上たったか */
+const backupOld = (at) => S.activeMemos().length > 0 && (!at || Date.now() - at > 14 * 86400000);
+
+/** 自動の控えの一覧。押すとその時の状態に戻せる */
+function SnapshotSheet({ onClose }) {
+  const [list, setList] = useState(null);
+  useEffect(() => { S.listSnapshots().then(setList); }, []);
+  const restore = async (x) => {
+    if (!confirm(t('confirmRestoreSnapshot', { d: formatDateTime(x.at), n: x.count }))) return;
+    onClose();
+    await S.restoreSnapshot(x.at);
+  };
+  const reason = (r) => ({ daily: t('snapDaily'), beforeRestore: t('snapBeforeRestore'), beforeImport: t('snapBeforeImport'), beforeEmptyTrash: t('snapBeforeEmpty'), beforeArchive: t('snapBeforeArchive') }[r] ?? r);
+  return html`<${Sheet} onClose=${onClose} label=${t('snapshots')}>
+    <div class="sheet-head"><span class="sheet-title">${t('snapshots')}</span><button class="link-btn strong" onClick=${onClose}>${t('done')}</button></div>
+    <p class="hint">${t('snapshotsHint')}</p>
+    ${list && list.length === 0 && html`<p class="empty">${t('noSnapshots')}</p>`}
+    <div class="group">
+      ${(list ?? []).map((x) => html`<div class="row">
+        <div class="flex"><div>${formatDateTime(x.at)}</div><div class="muted small-text">${reason(x.reason)} · ${t('nMemos', { n: x.count })}</div></div>
+        <button class="link-btn" onClick=${() => restore(x)}>${t('restore')}</button>
+      </div>`)}
+    </div>
+  </${Sheet}>`;
 }
 
 function FullBackup({ onClose }) {
@@ -185,10 +221,11 @@ export function Character() {
 export function Search({ initial = '' }) {
   const [q, setQ] = useState(initial);
   const [tag, setTag] = useState(null);
+  const [starOnly, setStarOnly] = useState(false);
   const query = q.trim().toLowerCase();
   const hashtag = query.match(/^[#＃]([\p{L}\p{N}_ー・]+)$/u)?.[1];
-  const memos = S.activeMemos();
-  const results = (tag
+  const memos = S.activeMemos().filter((m) => !starOnly || m.starred);
+  const results = (starOnly && !query && !tag ? memos.filter((m) => !S.isBlank(m)) : tag
     ? memos.filter((m) => m.tags.includes(tag))
     : hashtag
       ? memos.filter((m) => S.hashtagsIn(`${m.title}\n${m.body}`).some((h) => h.toLowerCase() === hashtag))
@@ -200,17 +237,22 @@ export function Search({ initial = '' }) {
     <${NavBar} title=${tag || t('search')} />
     <div class="search-box"><span class="muted">${Icon.search(18)}</span>
       <input type="search" placeholder=${t('searchPlaceholder')} aria-label=${t('search')} value=${q} onInput=${(e) => { setTag(null); setQ(e.target.value); }} autofocus=${!initial} /></div>
+    <div class="search-filters">
+      <button class=${`filter-chip ${starOnly ? 'on' : ''}`} aria-pressed=${starOnly} onClick=${() => setStarOnly(!starOnly)}>
+        ${starOnly ? Icon.starFill(15) : Icon.star(15)} ${t('starred')}<span class="filter-count">${S.activeMemos().filter((m) => m.starred).length}</span></button>
+      ${tag && html`<button class="filter-chip on" onClick=${() => setTag(null)}>${tag} ${Icon.close(12)}</button>`}
+    </div>
     <div class="scroll">
-      ${!query && !tag && html`<div class="browse">
+      ${!query && !tag && !starOnly && html`<div class="browse">
         <div class="group-title flush">${t('tagsTitle')}</div>
         <div class="pills pad">${S.state.tags.map((x) => html`<${TagPill} name=${x.name} onClick=${() => setTag(x.name)} />`)}</div>
         ${hashtags.length > 0 && html`<div class="group-title flush">${t('hashtags')}</div>
           <div class="pills pad">${hashtags.map(([h, n]) => html`<button class="link-chip hashtag-chip" onClick=${() => setQ(`#${h}`)}>#${h} <span class="muted">${n}</span></button>`)}</div>`}
       </div>`}
-      ${(query || tag) && results.length === 0 && html`<p class="empty">${t('notFound')}</p>`}
-      ${(query || tag) && results.length > 0 && html`<p class="hint flush">${t('results', { n: results.length })}</p>`}
+      ${(query || tag || starOnly) && results.length === 0 && html`<p class="empty">${starOnly && !query && !tag ? t('noStarred') : t('notFound')}</p>`}
+      ${(query || tag || starOnly) && results.length > 0 && html`<p class="hint flush">${t('results', { n: results.length })}</p>`}
       ${results.map((m) => html`<button class="result" onClick=${() => S.open({ name: 'detail', id: m.id })}>
-        <div class="muted small-text">${formatDay(S.memoDate(m))} ${m.allDay ? t('diary') : formatTime(m.createdAt)}</div>
+        <div class="muted small-text">${m.starred && html`<span class="head-star">★ </span>`}${formatDay(S.memoDate(m))} ${m.allDay ? t('diary') : formatTime(m.createdAt)}</div>
         ${m.title && html`<div class="post-title">${m.title}</div>`}
         <div class="clamp3"><${Linkified} text=${m.body} /></div>
       </button>`)}
