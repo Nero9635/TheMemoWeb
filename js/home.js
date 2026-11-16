@@ -2,15 +2,13 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../vendor/preact-htm.js';
 import * as S from './store.js';
 import { Icon } from './icons.js';
+import { t, formatMonthL, weekdayHeaders, formatMonthShortL } from './i18n.js';
 import {
-  Img, ProfileAvatar, PersonaAvatar, AiAvatar, Linkified, DateCapsule, TagPill, AutoText, ActionSheet,
-  TagSheet, usePostMenu, longPress, shareText, copyText, ReplyItem,
+  Img, ProfileAvatar, PersonaAvatar, AiAvatar, DateCapsule, TagPill, AutoText, ActionSheet,
+  TagSheet, usePostMenu, longPress, shareText, copyText, ReplyItem, tagColor, Linkified,
 } from './ui.js';
-import {
-  addDays, dateKey, formatDay, formatTime, hostOf, findUrls, parseDateKey, todayKey, weekStartOf, haptic,
-} from './util.js';
-
-const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+import { BlockView, toggleTodo } from './editor.js';
+import { addDays, dateKey, formatDay, formatTime, hostOf, findUrls, parseDateKey, todayKey, weekStartOf, haptic } from './util.js';
 
 /** タイムラインの並び: 日付の見出し → その日の投稿(日記が先頭)→ その日のまとめ */
 function buildFeed(memos, today, selected, notes) {
@@ -28,11 +26,52 @@ function buildFeed(memos, today, selected, notes) {
   }));
 }
 
+/** カレンダーに出す、日ごとのまとめ(投稿数・写真・日記・タグの色・AIのまとめ) */
+function dayInfo(memos, notes) {
+  const map = new Map();
+  for (const m of memos) {
+    if (S.isBlank(m)) continue;
+    const k = S.memoDate(m);
+    if (!map.has(k)) map.set(k, { posts: 0, photos: 0, diary: false, tags: [], firstPhoto: null });
+    const d = map.get(k);
+    d.posts += 1;
+    const imgs = S.memoImages(m);
+    d.photos += imgs.length;
+    if (!d.firstPhoto && imgs.length) d.firstPhoto = imgs[0];
+    if (m.allDay) d.diary = true;
+    m.tags.forEach((tg) => { if (!d.tags.includes(tg)) d.tags.push(tg); });
+  }
+  for (const k of Object.keys(notes)) {
+    if (!map.has(k)) map.set(k, { posts: 0, photos: 0, diary: false, tags: [], firstPhoto: null });
+    map.get(k).ai = true;
+  }
+  return map;
+}
+
+/** 今日(今日がまだなら昨日)から何日続けて書いているか */
+function streak(info, today) {
+  let k = info.get(today)?.posts ? today : addDays(today, -1);
+  let n = 0;
+  while (info.get(k)?.posts) { n += 1; k = addDays(k, -1); }
+  return n;
+}
+
+function rangeStats(info, start, end) {
+  let posts = 0; let photos = 0; let days = 0;
+  for (let k = start; k <= end; k = addDays(k, 1)) {
+    const d = info.get(k);
+    if (d?.posts) { posts += d.posts; photos += d.photos; days += 1; }
+  }
+  return { posts, photos, days };
+}
+
 export function Home() {
   const st = S.state;
   const today = todayKey();
-  const memos = S.activeMemos();
+  // 何も書いていない投稿(開いただけの日記など)はタイムラインに出さない
+  const memos = S.activeMemos().filter((m) => !S.isBlank(m));
   const feed = useMemo(() => buildFeed(memos, today, st.selected, st.dayNotes), [st.memos, st.selected, st.dayNotes, today]);
+  const info = useMemo(() => dayInfo(memos, st.dayNotes), [st.memos, st.dayNotes]);
   const [mode, setMode] = useState(st.settings.calendarHidden ? 'hidden' : 'week'); // week | month | hidden
   const [weekStart, setWeekStart] = useState(weekStartOf(st.selected));
   const [month, setMonth] = useState(st.selected.slice(0, 7));
@@ -70,9 +109,8 @@ export function Home() {
     const el = scroller.current;
     setAtEnd(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
     if (stick.current) return;
-    const headers = el.querySelectorAll('[data-day]');
     let current = null;
-    for (const h of headers) {
+    for (const h of el.querySelectorAll('[data-day]')) {
       if (h.offsetTop - el.scrollTop <= 4) current = h.dataset.day;
       else break;
     }
@@ -92,60 +130,71 @@ export function Home() {
     });
   };
 
-  const goLatest = () => {
+  const goToday = () => {
     stick.current = true;
     S.setState({ selected: today });
     setWeekStart(weekStartOf(today));
+    setMonth(today.slice(0, 7));
     scrollToEnd();
   };
 
   const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const title = mode === 'month'
-    ? `${month.slice(0, 4)}年${Number(month.slice(5))}月`
-    : week[0].slice(5, 7) === week[6].slice(5, 7)
-      ? `${week[0].slice(0, 4)}年${Number(week[0].slice(5, 7))}月`
-      : `${Number(week[0].slice(5, 7))}月〜${Number(week[6].slice(5, 7))}月`;
+  const [my, mm] = (mode === 'month' ? month : week[3].slice(0, 7)).split('-').map(Number);
+  const title = formatMonthL(my, mm);
+  const monthStart = `${month}-01`;
+  const monthEnd = dateKey(new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0));
+  const stats = mode === 'month' ? rangeStats(info, monthStart, monthEnd) : rangeStats(info, week[0], week[6]);
+  const days = streak(info, today);
 
   const review = () => {
-    if (mode === 'month') {
-      const [y, m] = month.split('-').map(Number);
-      S.reviewPeriod(`${month}-01`, dateKey(new Date(y, m, 0)), `${y}年${m}月`);
-    } else {
-      S.reviewPeriod(week[0], week[6], `${formatDay(week[0])}〜${formatDay(week[6])}`);
-    }
+    if (mode === 'month') S.reviewPeriod(monthStart, monthEnd, formatMonthL(my, mm));
+    else S.reviewPeriod(week[0], week[6], `${formatDay(week[0])} – ${formatDay(week[6])}`);
   };
+
+  const showingToday = mode === 'month' ? month === today.slice(0, 7) && st.selected === today : week.includes(today) && st.selected === today;
 
   return html`<div class="screen home">
     <div class="safe-top"></div>
-    ${!typing && mode !== 'hidden' && html`<header class="home-bar">
-      <button class="title-btn" onClick=${() => { if (mode === 'month') setCal('week'); else { setMonth((st.selected || today).slice(0, 7)); setCal('month'); } }}
-        aria-label=${mode === 'month' ? 'Show week' : 'Show month'}>${title}<span class="accent">${mode === 'month' ? Icon.chevronUp() : Icon.chevronDown()}</span></button>
+    ${!typing && html`<header class="home-bar">
+      <button class="title-btn" aria-label=${mode === 'month' ? t('showWeek') : t('showMonth')}
+        onClick=${() => { if (mode === 'month') setCal('week'); else { setMonth(st.selected.slice(0, 7)); setCal('month'); } }}>
+        <span>${title}</span><span class="accent chev-btn">${mode === 'month' ? Icon.chevronUp(14) : Icon.chevronDown(14)}</span></button>
       <span class="flex"></span>
-      <button class="icon-btn accent" aria-label="Search" onClick=${() => S.open({ name: 'search' })}>${Icon.search()}</button>
-      <button class="icon-btn accent" aria-label="AI review" disabled=${st.reviewBusy} onClick=${review}>${st.reviewBusy ? html`<span class="spinner"></span>` : Icon.sparkle()}</button>
-      <button class="icon-btn accent" aria-label="Settings" onClick=${() => S.open({ name: 'settings' })}>${Icon.gear()}</button>
-    </header>`}
-    ${mode === 'hidden' && !typing && html`<header class="home-bar compact">
-      <span class="flex"></span>
-      <button class="icon-btn accent" aria-label="Search" onClick=${() => S.open({ name: 'search' })}>${Icon.search()}</button>
-      <button class="icon-btn accent" aria-label="Settings" onClick=${() => S.open({ name: 'settings' })}>${Icon.gear()}</button>
+      ${!showingToday && html`<button class="pill-btn glass" onClick=${goToday}>${t('today')}</button>`}
+      <div class="glass-group">
+        <button class="glass-icon" aria-label=${t('search')} onClick=${() => S.open({ name: 'search' })}>${Icon.search(20)}</button>
+        <button class="glass-icon" aria-label=${t('aiReview')} disabled=${st.reviewBusy || mode === 'hidden'} onClick=${review}>${st.reviewBusy ? html`<span class="spinner"></span>` : Icon.sparkle(20)}</button>
+        <button class="glass-icon" aria-label=${t('settings')} onClick=${() => S.open({ name: 'settings' })}>${Icon.gear(20)}</button>
+      </div>
     </header>`}
 
-    ${mode !== 'hidden' && html`<${WeekdayRow} />`}
-    ${mode === 'week' && html`<${WeekStrip} week=${week} today=${today} selected=${st.selected} memos=${memos}
-      onPick=${jumpTo} onPrev=${() => setWeekStart(addDays(weekStart, -7))} onNext=${() => setWeekStart(addDays(weekStart, 7))}
-      onExpand=${() => { setMonth(st.selected.slice(0, 7)); setCal('month'); }} onHide=${() => setCal('hidden')} />`}
-    ${mode === 'month' && !typing && html`<${MonthGrid} month=${month} today=${today} selected=${st.selected} memos=${memos}
-      onMonth=${setMonth} onPick=${(k) => { setCal('week'); jumpTo(k); }} />`}
+    ${mode !== 'hidden' && html`<section class=${`cal-card ${typing ? 'compact' : ''}`} aria-label=${title}>
+      <${WeekdayRow} />
+      ${(mode === 'week' || typing) && html`<${WeekStrip} week=${week} today=${today} selected=${st.selected} info=${info}
+        onPick=${jumpTo} onPrev=${() => setWeekStart(addDays(weekStart, -7))} onNext=${() => setWeekStart(addDays(weekStart, 7))}
+        onExpand=${() => { setMonth(st.selected.slice(0, 7)); setCal('month'); }} onHide=${() => setCal('hidden')} />`}
+      ${mode === 'month' && !typing && html`<${MonthGrid} month=${month} today=${today} selected=${st.selected} info=${info}
+        onMonth=${setMonth} onPick=${(k) => S.setState({ selected: k })} />`}
+      ${!typing && html`<div class="cal-foot">
+        <div class="stats">
+          <span class="stat"><strong>${stats.posts}</strong> ${t('statPosts')}</span>
+          <span class="stat"><strong>${stats.days}</strong> ${t('statDays')}</span>
+          <span class="stat"><strong>${stats.photos}</strong> ${t('statPhotos')}</span>
+          ${days > 0 && html`<span class="stat streak"><strong>${days}</strong> ${t('statStreak')}</span>`}
+        </div>
+        ${mode === 'month' && html`<${SelectedDay} date=${st.selected} info=${info.get(st.selected)} note=${st.dayNotes[st.selected]}
+          onOpen=${() => { setCal('week'); jumpTo(st.selected); }} />`}
+      </div>`}
+    </section>`}
     ${!typing && html`<${Handle} mode=${mode} onChange=${setCal} />`}
 
     <div class="feed" ref=${scroller} onScroll=${onScroll}>
       <div>
         ${feed.map((day) => html`<${DaySection} key=${day.date} day=${day} today=${today} menu=${menu} />`)}
-        ${memos.length === 0 && html`<div class="empty"><strong>No posts yet</strong><p>下の入力欄に、思いついたことを書いて送ってみましょう。</p></div>`}
+        ${memos.length === 0 && html`<div class="empty"><strong>${t('noPostsYet')}</strong><p>${t('noPostsHint')}</p></div>`}
       </div>
     </div>
-    ${!atEnd && html`<button class="latest" onClick=${goLatest}>${Icon.chevronDown(14)} Latest</button>`}
+    ${!atEnd && html`<button class="latest glass" onClick=${goToday}>${Icon.chevronDown(14)} ${t('latest')}</button>`}
 
     <${Composer} onTyping=${setTyping} onPosted=${() => { stick.current = true; S.setState({ selected: today }); setWeekStart(weekStartOf(today)); }} />
     ${menu.view}
@@ -153,7 +202,7 @@ export function Home() {
 }
 
 function WeekdayRow() {
-  return html`<div class="weekdays" aria-hidden="true">${WEEK.map((w, i) => html`<span class=${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}>${w}</span>`)}</div>`;
+  return html`<div class="weekdays" aria-hidden="true">${weekdayHeaders().map((w, i) => html`<span class=${i === 0 ? 'sun' : i === 6 ? 'sat' : ''}>${w}</span>`)}</div>`;
 }
 
 /** 縦や横のスワイプを見分ける */
@@ -174,44 +223,98 @@ function swipe({ up, down, left, right }) {
   };
 }
 
-function DayButton({ date, today, selected, has, onPick, hidden = false }) {
-  const cls = `day ${date === today ? 'today' : date === selected ? 'selected' : ''} ${has ? 'has' : ''}`;
-  return html`<button class=${cls} style=${hidden ? 'visibility:hidden' : ''} aria-label=${formatDay(date)} onClick=${() => onPick(date)}>
-    <span class="num">${Number(date.slice(8))}</span><span class="dot" aria-hidden="true"></span>
-  </button>`;
+/** その日の印: タグの色の点(なければ青)を最大3つ */
+function Dots({ d }) {
+  if (!d?.posts) return html`<span class="dots"></span>`;
+  const colors = d.tags.slice(0, 3).map(tagColor);
+  while (colors.length < Math.min(d.posts, 3)) colors.push('var(--accent)');
+  return html`<span class="dots" aria-hidden="true">${colors.map((c) => html`<i style=${`background:${c}`}></i>`)}</span>`;
 }
 
-function WeekStrip({ week, today, selected, memos, onPick, onPrev, onNext, onExpand, onHide }) {
-  const has = new Set(memos.map(S.memoDate));
+function dayLabel(date, d) {
+  const parts = [formatDay(date)];
+  if (d?.posts) parts.push(d.posts === 1 ? t('onePost') : t('nPosts', { n: d.posts }));
+  if (d?.diary) parts.push(t('hasDiary'));
+  return parts.join(', ');
+}
+
+function WeekStrip({ week, today, selected, info, onPick, onPrev, onNext, onExpand, onHide }) {
   return html`<div class="week-strip" ...${swipe({ left: onNext, right: onPrev, down: onExpand, up: onHide })}>
-    ${week.map((d) => html`<${DayButton} date=${d} today=${today} selected=${selected} has=${has.has(d)} onPick=${onPick} />`)}
+    ${week.map((date) => {
+      const d = info.get(date);
+      const dow = parseDateKey(date).getDay();
+      return html`<button class=${`wday ${date === today ? 'today' : ''} ${date === selected ? 'selected' : ''} ${dow === 0 ? 'sun' : dow === 6 ? 'sat' : ''}`}
+        aria-label=${dayLabel(date, d)} aria-current=${date === today ? 'date' : undefined} onClick=${() => onPick(date)}>
+        <span class="num">${Number(date.slice(8))}</span>
+        <${Dots} d=${d} />
+        <span class="marks">${d?.diary && html`<i class="mark diary" aria-hidden="true"></i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
+      </button>`;
+    })}
   </div>`;
 }
 
-function MonthGrid({ month, today, selected, memos, onMonth, onPick }) {
+/** 月全体。上下(または左右)にスワイプで前後の月。写真のある日は小さな写真、投稿の数、日記と AI の印 */
+function MonthGrid({ month, today, selected, info, onMonth, onPick }) {
   const [y, m] = month.split('-').map(Number);
   const first = new Date(y, m - 1, 1);
-  const days = new Date(y, m, 0).getDate();
-  const has = new Set(memos.map(S.memoDate));
-  const cells = [...Array(first.getDay()).fill(null), ...Array.from({ length: days }, (_, i) => dateKey(new Date(y, m - 1, i + 1)))];
-  while (cells.length < 42) cells.push(null);
+  const count = new Date(y, m, 0).getDate();
+  const cells = [...Array(first.getDay()).fill(null), ...Array.from({ length: count }, (_, i) => dateKey(new Date(y, m - 1, i + 1)))];
+  while (cells.length % 7) cells.push(null);
   const shift = (n) => { const d = new Date(y, m - 1 + n, 1); onMonth(dateKey(d).slice(0, 7)); };
-  return html`<div class="month-grid" ...${swipe({ up: () => shift(1), down: () => shift(-1), left: () => shift(1), right: () => shift(-1) })}>
-    ${cells.map((d) => (d
-      ? html`<${DayButton} date=${d} today=${today} selected=${selected} has=${has.has(d)} onPick=${onPick} />`
-      : html`<span class="day" aria-hidden="true"></span>`))}
+  return html`<div>
+    <div class="month-nav">
+      <button class="glass-icon small" aria-label="Previous month" onClick=${() => shift(-1)}><span style="transform:rotate(90deg);display:inline-flex">${Icon.chevronDown(14)}</span></button>
+      <span class="month-nav-label">${formatMonthShortL(((m + 10) % 12) + 1)}</span>
+      <span class="flex"></span>
+      <span class="month-nav-label">${formatMonthShortL((m % 12) + 1)}</span>
+      <button class="glass-icon small" aria-label="Next month" onClick=${() => shift(1)}><span style="transform:rotate(-90deg);display:inline-flex">${Icon.chevronDown(14)}</span></button>
+    </div>
+    <div class="month-grid" ...${swipe({ up: () => shift(1), down: () => shift(-1), left: () => shift(1), right: () => shift(-1) })}>
+      ${cells.map((date) => {
+        if (!date) return html`<span class="mday blank" aria-hidden="true"></span>`;
+        const d = info.get(date);
+        const dow = parseDateKey(date).getDay();
+        return html`<button class=${`mday ${date === today ? 'today' : ''} ${date === selected ? 'selected' : ''} ${dow === 0 ? 'sun' : dow === 6 ? 'sat' : ''} ${d?.posts ? 'has' : ''}`}
+          aria-label=${dayLabel(date, d)} aria-current=${date === today ? 'date' : undefined} onClick=${() => onPick(date)}>
+          ${d?.firstPhoto && html`<${Img} name=${d.firstPhoto} class="mday-photo" />`}
+          <span class="num">${Number(date.slice(8))}</span>
+          <span class="mday-foot">
+            <${Dots} d=${d} />
+            ${d?.posts > 1 && html`<span class="count">${d.posts}</span>`}
+          </span>
+          <span class="marks">${d?.diary && html`<i class="mark diary" aria-hidden="true"></i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
+        </button>`;
+      })}
+    </div>
+  </div>`;
+}
+
+/** 月表示で選んだ日の中身(投稿・写真・日記・タグ・AI のまとめ) */
+function SelectedDay({ date, info, note, onOpen }) {
+  const d = info ?? { posts: 0, photos: 0, diary: false, tags: [] };
+  return html`<div class="sel-day">
+    <div class="sel-day-head">
+      <${DateCapsule} date=${date} small />
+      <span class="muted small-text">${d.posts ? t('dayDetail', { n: d.posts, p: d.photos }) : t('noPosts')}${d.diary ? ` · ${t('hasDiary')}` : ''}</span>
+      <span class="flex"></span>
+      ${(d.posts || note) && html`<button class="pill-btn glass small" onClick=${onOpen}>${t('open')}</button>`}
+    </div>
+    ${d.tags.length > 0 && html`<div class="pills">${d.tags.slice(0, 6).map((tg) => html`<${TagPill} name=${tg} />`)}</div>`}
+    ${note?.summary && html`<p class="sel-day-note clamp2">✦ ${note.summary}</p>`}
   </div>`;
 }
 
 /** 取っ手。下へで「隠す → 週 → 月」、上へで逆。押すと次の形へ */
 function Handle({ mode, onChange }) {
   const next = { hidden: 'week', week: 'month', month: 'week' };
-  return html`<button class="handle" aria-label=${mode === 'hidden' ? 'Show calendar' : mode === 'week' ? 'Show month' : 'Show week'}
+  return html`<button class="handle" aria-label=${mode === 'hidden' ? t('showCalendar') : mode === 'week' ? t('showMonth') : t('showWeek')}
     onClick=${() => onChange(next[mode])}
     ...${swipe({ down: () => onChange(mode === 'hidden' ? 'week' : 'month'), up: () => onChange(mode === 'month' ? 'week' : 'hidden') })}>
     <span></span>
   </button>`;
 }
+
+const DAY_LINE = ['#E5484D', '#8E6BD8', '#F06A3B', '#2A9BD8', '#3FA45B', '#E9B21F', '#4D62D6'];
 
 function DaySection({ day, today, menu }) {
   const st = S.state;
@@ -220,42 +323,38 @@ function DaySection({ day, today, menu }) {
   const p = st.settings.persona;
   const note = day.note;
   return html`<section>
-    <div class="day-header" data-day=${day.date} style=${`--day:${''}`}>
+    <div class="day-header" data-day=${day.date}>
+      <span class="day-line" style=${`background:${DAY_LINE[parseDateKey(day.date).getDay()]}`} aria-hidden="true"></span>
       <${DateCapsule} date=${day.date} />
-      ${day.date === today && html`<span class="today-label">Today</span>`}
+      ${day.date === today && html`<span class="today-label">${t('today')}</span>`}
       <span class="flex"></span>
-      <button class="icon-btn muted" aria-label="AI for this day" disabled=${busy} onClick=${() => setAiOpen(true)}>${busy ? html`<span class="spinner"></span>` : Icon.sparkle(20)}</button>
-      <button class="link-btn strong" onClick=${() => { const d = S.diaryFor(day.date); S.open({ name: 'detail', id: d.id }); }}>Diary</button>
+      <button class="glass-icon small" aria-label=${t('aiForDay')} disabled=${busy} onClick=${() => setAiOpen(true)}>${busy ? html`<span class="spinner"></span>` : Icon.sparkle(16)}</button>
+      <button class="pill-btn glass small" onClick=${() => { const d = S.diaryFor(day.date); S.open({ name: 'detail', id: d.id }); }}>${t('diary')}</button>
     </div>
-    <div class="day-line" style=${`background:${dayLine(day.date)}`}></div>
     ${day.posts.map((m) => html`<${Post} key=${m.id} memo=${m} menu=${menu} />`)}
     ${(note || busy) && html`<div class="day-review">
-      ${(note?.summary || (busy && !st.dayBusy.jung)) && html`<${ReplyItem} avatar=${html`<${AiAvatar} />`} name="Day summary" meta=${formatDay(day.date)} line=${false}
+      ${(note?.summary || (busy && !st.dayBusy.jung)) && html`<${ReplyItem} avatar=${html`<${AiAvatar} />`} name=${t('daySummary')} meta=${formatDay(day.date)} line=${false}
         busy=${busy && !st.dayBusy.jung} foldable=${(note?.summary ?? '').length > 160}
         menu=${[
-          { label: 'Summarize again', onClick: () => S.reviewDay(day.date, false) },
-          { label: 'Copy', onClick: () => copyText(note.summary) },
-          { label: 'Remove', danger: true, onClick: () => S.clearDayNote(day.date, false) },
+          { label: t('summarizeAgain'), onClick: () => S.reviewDay(day.date, false) },
+          { label: t('copy'), onClick: () => copyText(note.summary) },
+          { label: t('remove'), danger: true, onClick: () => S.clearDayNote(day.date, false) },
         ]}>${note?.summary && html`<p class="reply-text">${note.summary}</p>`}</${ReplyItem}>`}
       ${(note?.jung || (busy && st.dayBusy.jung)) && html`<${ReplyItem}
         avatar=${html`<${PersonaAvatar} by=${note?.jung ? note.jungBy ?? '' : null} icon=${note?.jungIcon ?? ''} />`}
-        name=${S.authorOf(p, note?.jung ? note.jungBy ?? '' : null, note?.jungIcon ?? '').name} meta=${`on ${formatDay(day.date)}`} line=${false}
+        name=${S.authorOf(p, note?.jung ? note.jungBy ?? '' : null, note?.jungIcon ?? '').name} meta=${t('onDay', { d: formatDay(day.date) })} line=${false}
         busy=${busy && st.dayBusy.jung} foldable=${(note?.jung ?? '').length > 160}
         menu=${[
-          { label: 'Comment again', onClick: () => S.reviewDay(day.date, true) },
-          { label: 'Copy', onClick: () => copyText(note.jung) },
-          { label: 'Remove', danger: true, onClick: () => S.clearDayNote(day.date, true) },
+          { label: t('commentAgain'), onClick: () => S.reviewDay(day.date, true) },
+          { label: t('copy'), onClick: () => copyText(note.jung) },
+          { label: t('remove'), danger: true, onClick: () => S.clearDayNote(day.date, true) },
         ]}>${note?.jung && html`<p class="reply-text">${note.jung}</p>`}</${ReplyItem}>`}
     </div>`}
     ${aiOpen && html`<${ActionSheet} title=${formatDay(day.date)} onClose=${() => setAiOpen(false)} items=${[
-      { label: 'Summarize the day', icon: Icon.sparkle(20), onClick: () => S.reviewDay(day.date, false) },
-      { label: `${p.name} on the day`, icon: html`<span class="glyph">${S.personaGlyph(p)}</span>`, onClick: () => S.reviewDay(day.date, true) },
+      { label: t('summarizeDay'), icon: Icon.sparkle(20), onClick: () => S.reviewDay(day.date, false) },
+      { label: t('personaOnDay', { name: p.name }), icon: html`<span class="glyph">${S.personaGlyph(p)}</span>`, onClick: () => S.reviewDay(day.date, true) },
     ]} />`}
   </section>`;
-}
-
-function dayLine(key) {
-  return ['#C62828', '#7E57C2', '#E64A19', '#0288D1', '#388E3C', '#F2B705', '#3949AB'][parseDateKey(key).getDay()];
 }
 
 /** タイムラインの1件 */
@@ -282,25 +381,26 @@ function Post({ memo, menu }) {
     <div class="post-main">
       <div class="post-head">
         <strong class="ellipsis">${st.settings.profileName}</strong>
-        <span class="muted"> · ${memo.allDay ? 'Diary' : formatTime(memo.createdAt)}</span>
+        <span class="muted"> · ${memo.allDay ? t('diary') : formatTime(memo.createdAt)}</span>
         <span class="flex"></span>
-        <button class="icon-btn small muted" aria-label="More" onClick=${(e) => { e.stopPropagation(); menu.openMenu(memo); }}>${Icon.more()}</button>
+        <button class="icon-btn small muted" aria-label=${t('more')} onClick=${(e) => { e.stopPropagation(); menu.openMenu(memo); }}>${Icon.more()}</button>
       </div>
-      ${memo.title.trim() && html`<div class="post-title">${memo.title}</div>`}
-      ${memo.body.trim() && html`<p ref=${bodyRef} class=${`post-body ${expanded ? '' : 'clamp8'}`}><${Linkified} text=${memo.body.trim()} /></p>`}
-      ${overflow && !expanded && html`<button class="link-btn strong show-more" onClick=${(e) => { e.stopPropagation(); setExpanded(true); }}>Show more</button>`}
+      ${memo.title.trim() && html`<div class="post-title"><${Linkified} text=${memo.title} /></div>`}
+      ${memo.body.trim() && html`<div ref=${bodyRef} class=${`post-body ${expanded ? '' : 'folded'} ${overflow && !expanded ? 'fade' : ''}`}>
+        <${BlockView} memo=${memo} onToggle=${(id) => toggleTodo(memo, id)} /></div>`}
+      ${overflow && !expanded && html`<button class="link-btn strong show-more" onClick=${(e) => { e.stopPropagation(); setExpanded(true); }}>${t('showMore')}</button>`}
       ${images.length > 0 && html`<${Media} names=${images} />`}
       ${urls.slice(0, 1).map((u) => html`<a class="link-card" href=${u} target="_blank" rel="noopener" onClick=${(e) => e.stopPropagation()}>
         <span class="link-host">${Icon.link()} ${hostOf(u)}</span></a>`)}
-      ${memo.tags.length > 0 && html`<div class="pills">${memo.tags.map((t) => html`<${TagPill} name=${t} onClick=${() => menu.openTags(memo)} />`)}</div>`}
+      ${memo.tags.length > 0 && html`<div class="pills">${memo.tags.map((tg) => html`<${TagPill} name=${tg} onClick=${() => menu.openTags(memo)} />`)}</div>`}
       ${(memo.place || memo.weather || memo.steps != null) && memo.allDay && html`<div class="details muted">
-        ${[memo.place, memo.weather, memo.steps != null ? `${memo.steps} steps` : ''].filter(Boolean).join(' · ')}</div>`}
+        ${[memo.place, memo.weather, memo.steps != null ? t('steps', { n: memo.steps }) : ''].filter(Boolean).join(' · ')}</div>`}
       <div class="actions" onClick=${(e) => e.stopPropagation()}>
-        <button class="act" aria-label="Replies" onClick=${open}>${Icon.reply()}${S.replyCount(memo) > 0 && html`<span>${S.replyCount(memo)}</span>`}</button>
-        <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${`Ask ${persona.name}`}
+        <button class="act" aria-label=${t('replies')} onClick=${open}>${Icon.reply()}${S.replyCount(memo) > 0 && html`<span>${S.replyCount(memo)}</span>`}</button>
+        <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('ask', { name: persona.name })}
           onClick=${() => (memo.aiComment ? open() : S.commentOn(memo.id))}>${jungBusy ? html`<span class="spinner"></span>` : S.personaGlyph(persona)}</button>
-        <button class="act" aria-label="Tags" onClick=${() => menu.openTags(memo)}>${Icon.tag()}${memo.tags.length > 0 && html`<span>${memo.tags.length}</span>`}</button>
-        <button class="act" aria-label="Share" onClick=${() => shareText(S.plainText(memo))}>${Icon.share()}</button>
+        <button class="act" aria-label=${t('tags')} onClick=${() => menu.openTags(memo)}>${Icon.tag()}${memo.tags.length > 0 && html`<span>${memo.tags.length}</span>`}</button>
+        <button class="act" aria-label=${t('share')} onClick=${() => shareText(S.plainText(memo))}>${Icon.share()}</button>
       </div>
     </div>
   </article>`;
@@ -315,7 +415,7 @@ export function Media({ names }) {
   </div>`;
 }
 
-/** 画面の下にいつもある入力欄 */
+/** 画面の下に浮かぶ入力欄 */
 function Composer({ onTyping, onPosted }) {
   const st = S.state;
   const [text, setText] = useState('');
@@ -350,7 +450,7 @@ function Composer({ onTyping, onPosted }) {
   const dictate = () => {
     if (listening) { recog.current?.stop(); return; }
     const r = new Speech();
-    r.lang = 'ja-JP';
+    r.lang = { en: 'en-US', ja: 'ja-JP', zh: 'zh-CN' }[st.settings.language] ?? 'en-US';
     r.interimResults = false;
     r.continuous = false;
     const base = text;
@@ -367,29 +467,31 @@ function Composer({ onTyping, onPosted }) {
 
   const insertWord = (w) => {
     S.useWord(w);
-    setText((t) => (t ? `${t}${t.endsWith(' ') || t.endsWith('\n') ? '' : ' '}${w}` : w));
+    setText((x) => (x ? `${x}${x.endsWith(' ') || x.endsWith('\n') ? '' : ' '}${w}` : w));
   };
 
   return html`<div class="composer" onfocusin=${() => onTyping(true)} onfocusout=${() => onTyping(false)}>
-    ${tools && html`<div class="tools">
-      <button class="tool" onClick=${() => photoInput.current.click()}><span>${Icon.photo(26)}</span>Photos</button>
-      <button class="tool" onClick=${() => cameraInput.current.click()}><span>${Icon.camera(26)}</span>Camera</button>
-      <button class="tool" onClick=${() => setTagSheet(true)}><span>${Icon.tag(26)}</span>${tags.length ? `Tags (${tags.length})` : 'Tags'}</button>
-      <button class="tool" onClick=${() => setWords(!words)}><span>${Icon.words(26)}</span>Words</button>
-    </div>`}
-    ${tools && words && html`<div class="word-row">${[...st.quickWords].sort((a, b) => b.uses - a.uses).map((w) => html`<button class="word" onClick=${() => insertWord(w.text)}>${w.text}</button>`)}</div>`}
-    ${(images.length > 0 || tags.length > 0) && html`<div class="pending">
-      ${images.map((n) => html`<div class="thumb"><${Img} name=${n} class="thumb-img" />
-        <button class="thumb-x" aria-label="Remove photo" onClick=${() => setImages(images.filter((x) => x !== n))}>${Icon.close(12)}</button></div>`)}
-      ${tags.map((t) => html`<${TagPill} name=${`${t} ✕`} onClick=${() => setTags(tags.filter((x) => x !== t))} />`)}
-    </div>`}
-    <div class="compose-row">
-      <button class=${`round ${tools ? 'on' : ''}`} aria-label=${tools ? 'Close tools' : 'Add photo or tag'} onClick=${() => setTools(!tools)}>${tools ? Icon.close() : Icon.plus()}</button>
-      <div class="field">
-        <${AutoText} value=${text} onInput=${setText} placeholder="Write…" label="Write a post" maxRows=${5} class="field-input" onSubmit=${send} />
-        ${Speech && !text && html`<button class=${`icon-btn small ${listening ? 'listening' : 'muted'}`} aria-label=${listening ? 'Stop dictation' : 'Dictate'} onClick=${dictate}>${Icon.mic()}</button>`}
+    <div class="composer-card glass">
+      ${tools && html`<div class="tools">
+        <button class="tool" onClick=${() => photoInput.current.click()}><span>${Icon.photo(24)}</span>${t('photos')}</button>
+        <button class="tool" onClick=${() => cameraInput.current.click()}><span>${Icon.camera(24)}</span>${t('camera')}</button>
+        <button class="tool" onClick=${() => setTagSheet(true)}><span>${Icon.tag(24)}</span>${tags.length ? `${t('tags')} (${tags.length})` : t('tags')}</button>
+        <button class="tool" onClick=${() => setWords(!words)}><span>${Icon.words(24)}</span>${t('words')}</button>
+      </div>`}
+      ${tools && words && html`<div class="word-row">${[...st.quickWords].sort((a, b) => b.uses - a.uses).map((w) => html`<button class="word" onClick=${() => insertWord(w.text)}>${w.text}</button>`)}</div>`}
+      ${(images.length > 0 || tags.length > 0) && html`<div class="pending">
+        ${images.map((n) => html`<div class="thumb"><${Img} name=${n} class="thumb-img" />
+          <button class="thumb-x" aria-label=${t('remove')} onClick=${() => setImages(images.filter((x) => x !== n))}>${Icon.close(12)}</button></div>`)}
+        ${tags.map((tg) => html`<${TagPill} name=${`${tg} ✕`} onClick=${() => setTags(tags.filter((x) => x !== tg))} />`)}
+      </div>`}
+      <div class="compose-row">
+        <button class=${`round ${tools ? 'on' : ''}`} aria-label=${tools ? t('closeTools') : t('addTools')} onClick=${() => setTools(!tools)}>${tools ? Icon.close() : Icon.plus()}</button>
+        <div class="field">
+          <${AutoText} value=${text} onInput=${setText} placeholder=${t('write')} label=${t('writeLabel')} maxRows=${6} class="field-input" onSubmit=${send} />
+          ${Speech && !text && html`<button class=${`icon-btn small ${listening ? 'listening' : 'muted'}`} aria-label=${listening ? t('stopDictate') : t('dictate')} onClick=${dictate}>${Icon.mic()}</button>`}
+        </div>
+        <button class=${`round send ${canSend ? 'ready' : ''}`} aria-label=${t('send')} disabled=${!canSend} onClick=${send}>${Icon.send()}</button>
       </div>
-      <button class=${`round send ${canSend ? 'ready' : ''}`} aria-label="Post" disabled=${!canSend} onClick=${send}>${Icon.send()}</button>
     </div>
     <input ref=${photoInput} type="file" accept="image/*" multiple hidden onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
     <input ref=${cameraInput} type="file" accept="image/*" capture="environment" hidden onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />

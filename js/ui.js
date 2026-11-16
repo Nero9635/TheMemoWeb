@@ -2,6 +2,7 @@
 import { html, useEffect, useRef, useState, useReducer, useLayoutEffect } from '../vendor/preact-htm.js';
 import * as S from './store.js';
 import { Icon } from './icons.js';
+import { t } from './i18n.js';
 import { formatDay, weekdayColor, weekdayTextColor, splitLinks, tagStyle, dateKey, TAG_COLORS } from './util.js';
 
 /** 状態が変わったら描き直す */
@@ -73,11 +74,15 @@ export function DateCapsule({ date, small = false }) {
 }
 
 export function TagPill({ name, onClick }) {
-  const t = S.tagInfo(name);
-  return html`<button class="pill" style=${tagStyle(t)} onClick=${(e) => { e.stopPropagation(); onClick?.(); }}>${name}</button>`;
+  const tg = S.tagInfo(name);
+  return html`<button class="pill" style=${tagStyle(tg)} onClick=${(e) => { e.stopPropagation(); onClick?.(); }}>${name}</button>`;
 }
 
-/** 高さが文字に合わせて伸びる入力欄 */
+export function tagColor(name) {
+  return TAG_COLORS[S.tagInfo(name).color] ?? TAG_COLORS[0];
+}
+
+/** 高さが文字に合わせて伸びる入力欄。onSubmit があれば ⌘ + Return で送る */
 export function AutoText({ value, onInput, placeholder, class: cls, maxRows = 0, label, autofocus = false, onSubmit = null }) {
   const ref = useRef();
   useLayoutEffect(() => {
@@ -90,7 +95,6 @@ export function AutoText({ value, onInput, placeholder, class: cls, maxRows = 0,
     el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
   }, [value]);
   useEffect(() => { if (autofocus) ref.current?.focus(); }, []);
-  // iPad のキーボードでは ⌘ + Return で送る
   const onKeyDown = onSubmit && ((e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onSubmit(); }
   });
@@ -98,7 +102,7 @@ export function AutoText({ value, onInput, placeholder, class: cls, maxRows = 0,
     onInput=${(e) => onInput(e.target.value)} onKeyDown=${onKeyDown}></textarea>`;
 }
 
-// ---- シート(下からせり上がる画面) ----
+// ---- シート(下からせり上がる / iPad では浮かぶ画面) ----
 
 export function Sheet({ onClose, children, label = 'Sheet' }) {
   useEffect(() => {
@@ -107,7 +111,7 @@ export function Sheet({ onClose, children, label = 'Sheet' }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   return html`<div class="backdrop" onClick=${onClose}>
-    <div class="sheet" role="dialog" aria-label=${label} onClick=${(e) => e.stopPropagation()}>
+    <div class="sheet glass" role="dialog" aria-label=${label} onClick=${(e) => e.stopPropagation()}>
       <div class="grabber" aria-hidden="true"></div>
       ${children}
     </div>
@@ -119,7 +123,7 @@ export function ActionSheet({ items, onClose, preview = null, title = '' }) {
   return html`<div class="backdrop menu-backdrop" onClick=${onClose}>
     <div class="menu-wrap" onClick=${(e) => e.stopPropagation()}>
       ${preview && html`<div class="menu-preview">${preview}</div>`}
-      <div class="menu" role="menu" aria-label=${title || 'Actions'}>
+      <div class="menu glass" role="menu" aria-label=${title || 'Actions'}>
         ${title && html`<div class="menu-title">${title}</div>`}
         ${items.filter(Boolean).map((it) => (it.divider
           ? html`<div class="menu-divider" aria-hidden="true"></div>`
@@ -128,7 +132,7 @@ export function ActionSheet({ items, onClose, preview = null, title = '' }) {
               <span>${it.label}</span>${it.icon && html`<span class="menu-icon">${it.icon}</span>`}
             </button>`))}
       </div>
-      <button class="menu-cancel" onClick=${onClose}>Cancel</button>
+      <button class="menu-cancel glass" onClick=${onClose}>${t('cancel')}</button>
     </div>
   </div>`;
 }
@@ -141,7 +145,7 @@ export function TagSheet({ selected, onChange, onClose }) {
   const [sel, setSel] = useState(selected);
   const [name, setName] = useState('');
   // 一覧のタグ + この投稿に付いている一覧外のタグ(外せるように)
-  const names = [...new Set([...S.state.tags.map((t) => t.name), ...sel])];
+  const names = [...new Set([...S.state.tags.map((x) => x.name), ...sel])];
   const toggle = (n) => {
     const next = sel.includes(n) ? sel.filter((x) => x !== n) : [...sel, n];
     setSel(next);
@@ -154,21 +158,21 @@ export function TagSheet({ selected, onChange, onClose }) {
     if (!sel.includes(n)) toggle(n);
     setName('');
   };
-  return html`<${Sheet} onClose=${onClose} label="Tags">
-    <div class="sheet-head"><span class="sheet-title">Tags</span><button class="link-btn strong" onClick=${onClose}>Done</button></div>
+  return html`<${Sheet} onClose=${onClose} label=${t('tags')}>
+    <div class="sheet-head"><span class="sheet-title">${t('tags')}</span><button class="link-btn strong" onClick=${onClose}>${t('done')}</button></div>
     <div class="group">
       ${names.map((n) => html`<button class="row" onClick=${() => toggle(n)}>
-        <span class="tag-dot" style=${`background:${TAG_COLORS[S.tagInfo(n).color] ?? TAG_COLORS[0]}`}></span><span class="row-label">${n}</span>
-        ${!S.isListedTag(n) && html`<span class="row-value small-text">not in list</span>`}
+        <span class="tag-dot" style=${`background:${tagColor(n)}`}></span><span class="row-label">${n}</span>
+        ${!S.isListedTag(n) && html`<span class="row-value small-text">${t('notInList')}</span>`}
         ${sel.includes(n) && html`<span class="accent">${Icon.check()}</span>`}
       </button>`)}
       <form class="row" onSubmit=${(e) => { e.preventDefault(); add(); }}>
-        <input class="row-input" placeholder="Add a tag to the list" aria-label="New tag" value=${name} onInput=${(e) => setName(e.target.value)} />
-        <button type="submit" class="link-btn" disabled=${!name.trim()}>Add</button>
+        <input class="row-input" placeholder=${t('addTagToList')} aria-label=${t('newTag')} value=${name} onInput=${(e) => setName(e.target.value)} />
+        <button type="submit" class="link-btn" disabled=${!name.trim()}>${t('add')}</button>
       </form>
     </div>
-    <p class="hint">タグは決まった分類です。自由な言葉は、本文に「#銀杏」のように書くとハッシュタグになります。</p>
-    <button class="link-btn strong pad" onClick=${() => { onClose(); S.open({ name: 'tags' }); }}>Manage tags</button>
+    <p class="hint">${t('tagSheetHint')}</p>
+    <button class="link-btn strong pad" onClick=${() => { onClose(); S.open({ name: 'tags' }); }}>${t('manageTags')}</button>
   </${Sheet}>`;
 }
 
@@ -184,15 +188,15 @@ export function TimeSheet({ memo, onClose }) {
     S.setMemoTime(memo.id, new Date(y, mo - 1, da, h, mi).getTime());
     onClose();
   };
-  return html`<${Sheet} onClose=${onClose} label="Change time">
-    <div class="sheet-head"><button class="link-btn" onClick=${onClose}>Cancel</button>
-      <span class="sheet-title">${memo.allDay ? 'Change date' : 'Change time'}</span>
-      <button class="link-btn strong" disabled=${taken || !date} onClick=${save}>Save</button></div>
+  return html`<${Sheet} onClose=${onClose} label=${t('changeTime')}>
+    <div class="sheet-head"><button class="link-btn" onClick=${onClose}>${t('cancel')}</button>
+      <span class="sheet-title">${memo.allDay ? t('changeDate') : t('changeTime')}</span>
+      <button class="link-btn strong" disabled=${taken || !date} onClick=${save}>${t('save')}</button></div>
     <div class="group">
-      <label class="row"><span class="row-label">Date</span><input type="date" class="row-native" value=${date} onInput=${(e) => setDate(e.target.value)} /></label>
-      ${!memo.allDay && html`<label class="row"><span class="row-label">Time</span><input type="time" class="row-native" value=${time} onInput=${(e) => setTime(e.target.value)} /></label>`}
+      <label class="row"><span class="row-label">${t('date')}</span><input type="date" class="row-native" value=${date} onInput=${(e) => setDate(e.target.value)} /></label>
+      ${!memo.allDay && html`<label class="row"><span class="row-label">${t('time')}</span><input type="time" class="row-native" value=${time} onInput=${(e) => setTime(e.target.value)} /></label>`}
     </div>
-    ${taken && html`<p class="hint danger-text">この日にはもう日記があります。</p>`}
+    ${taken && html`<p class="hint danger-text">${t('diaryTaken')}</p>`}
   </${Sheet}>`;
 }
 
@@ -205,17 +209,17 @@ export function usePostMenu() {
   const persona = S.state.settings.persona;
   const view = html`
     ${menu && html`<${ActionSheet} preview=${menu.preview} onClose=${() => setMenu(null)} items=${[
-      { label: 'Edit', icon: Icon.edit(), onClick: () => S.open({ name: 'detail', id: menu.memo.id }) },
-      { label: menu.memo.allDay ? 'Change date' : 'Change time', icon: Icon.clock(), onClick: () => setTiming(menu.memo) },
-      { label: 'Tags', icon: Icon.tag(20), onClick: () => setTagging(menu.memo) },
-      { label: `Ask ${persona.name}`, icon: html`<span class="glyph">${S.personaGlyph(persona)}</span>`, disabled: !!S.state.busy, onClick: () => S.commentOn(menu.memo.id) },
+      { label: t('edit'), icon: Icon.edit(), onClick: () => S.open({ name: 'detail', id: menu.memo.id }) },
+      { label: menu.memo.allDay ? t('changeDate') : t('changeTime'), icon: Icon.clock(), onClick: () => setTiming(menu.memo) },
+      { label: t('tags'), icon: Icon.tag(20), onClick: () => setTagging(menu.memo) },
+      { label: t('ask', { name: persona.name }), icon: html`<span class="glyph">${S.personaGlyph(persona)}</span>`, disabled: !!S.state.busy, onClick: () => S.commentOn(menu.memo.id) },
       { divider: true },
-      { label: 'Copy text', icon: Icon.copy(), onClick: () => copyText(S.plainText(menu.memo)) },
-      { label: 'Share', icon: Icon.share(20), onClick: () => shareText(S.plainText(menu.memo)) },
+      { label: t('copyText'), icon: Icon.copy(), onClick: () => copyText(S.plainText(menu.memo)) },
+      { label: t('share'), icon: Icon.share(20), onClick: () => shareText(S.plainText(menu.memo)) },
       { divider: true },
-      { label: 'Delete', icon: Icon.trash(), danger: true, onClick: () => { if (confirm('この投稿をゴミ箱に移しますか?\n30日間は設定の「Trash」から戻せます。')) S.trashMemo(menu.memo.id); } },
+      { label: t('delete'), icon: Icon.trash(), danger: true, onClick: () => { if (confirm(t('confirmTrash'))) S.trashMemo(menu.memo.id); } },
     ]} />`}
-    ${tagging && html`<${TagSheet} selected=${tagging.tags} onChange=${(t) => S.setMemoTags(tagging.id, t)} onClose=${() => setTagging(null)} />`}
+    ${tagging && html`<${TagSheet} selected=${tagging.tags} onChange=${(tg) => S.setMemoTags(tagging.id, tg)} onClose=${() => setTagging(null)} />`}
     ${timing && html`<${TimeSheet} memo=${timing} onClose=${() => setTiming(null)} />`}
   `;
   return { openMenu, openTags: setTagging, view };
@@ -241,9 +245,9 @@ export function longPress(onLong) {
 export async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
-    S.say('コピーしました。');
+    S.say(t('copied'));
   } catch {
-    S.say('コピーできませんでした。');
+    S.say(t('copyFailed'));
   }
 }
 
@@ -263,11 +267,16 @@ export function ReplyItem({ avatar, name, meta, busy = false, menu = null, child
     <div class="reply-side">${avatar}${line && html`<div class="thread-line"></div>`}</div>
     <div class="reply-main">
       <div class="reply-head"><strong>${name}</strong><span class="muted"> · ${meta}</span><span class="flex"></span>
-        ${menu && html`<button class="icon-btn small" aria-label="More" onClick=${() => setOpen(true)}>${Icon.more()}</button>`}</div>
+        ${menu && html`<button class="icon-btn small" aria-label=${t('more')} onClick=${() => setOpen(true)}>${Icon.more()}</button>`}</div>
       ${busy && html`<div class="progress" role="progressbar" aria-label="Working"><span></span></div>`}
       <div class=${showAll ? '' : 'clamp4'}>${children}</div>
-      ${!showAll && html`<button class="link-btn strong show-more" onClick=${() => setShowAll(true)}>Show more</button>`}
+      ${!showAll && html`<button class="link-btn strong show-more" onClick=${() => setShowAll(true)}>${t('showMore')}</button>`}
     </div>
     ${open && html`<${ActionSheet} items=${menu} onClose=${() => setOpen(false)} />`}
   </div>`;
+}
+
+/** iOS 風の丸いガラスのボタン(戻る・閉じるなど) */
+export function GlassButton({ label, onClick, children, disabled = false, class: cls = '' }) {
+  return html`<button class=${`glass-btn ${cls}`} aria-label=${label} disabled=${disabled} onClick=${onClick}>${children}</button>`;
 }

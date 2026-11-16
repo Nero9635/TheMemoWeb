@@ -1,6 +1,5 @@
 // 日付・文字・色など、画面とデータの両方で使う小さな道具
-
-const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+import { formatDayL } from './i18n.js';
 
 /** 端末の時刻での日付キー(YYYY-MM-DD)。Android 版の LocalDate.toString() と同じ形 */
 export function dateKey(d) {
@@ -23,10 +22,9 @@ export function addDays(key, n) {
   return dateKey(d);
 }
 
-/** 「10月19日(月)」 */
+/** 設定の言語での日付(「Mon, Oct 19」「10月19日(月)」「10月19日 周一」) */
 export function formatDay(key) {
-  const d = parseDateKey(key);
-  return `${d.getMonth() + 1}月${d.getDate()}日(${WEEKDAYS[d.getDay()]})`;
+  return formatDayL(parseDateKey(key));
 }
 
 /** 「8:12」 */

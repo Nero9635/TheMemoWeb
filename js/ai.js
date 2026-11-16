@@ -1,4 +1,5 @@
 // Gemini の呼び出しと、すべてのプロンプト(Android 版 ai/Prompts.kt と同じ内容)
+import { t } from './i18n.js';
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const DEFAULT_MODEL = 'gemini-flash-latest';
@@ -18,7 +19,7 @@ export async function generate(apiKey, model, system, turns, json = false) {
   const text = (candidate?.content?.parts ?? []).filter((p) => !p.thought).map((p) => p.text ?? '').join('').trim();
   if (!text) {
     const reason = res.promptFeedback?.blockReason || candidate?.finishReason;
-    throw new AiError(`AIから応答が返りませんでした${reason ? `(${reason})` : ''}。`);
+    throw new AiError(t('aiEmpty', { r: reason ? ` (${reason})` : '' }));
   }
   return text;
 }
@@ -42,18 +43,18 @@ async function request(method, url, apiKey, body) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new AiError('通信できませんでした。電波の状況を確認して、もう一度試してください。');
+    throw new AiError(t('offline'));
   }
   const raw = await res.text();
   if (!res.ok) {
     let detail = '';
     try { detail = JSON.parse(raw).error?.message ?? ''; } catch { /* 読めなければ空 */ }
     const code = res.status;
-    const hint = [400, 401, 403].includes(code) ? 'APIキーが正しいか設定で確認してください。'
-      : code === 404 ? 'モデル名が正しいか設定で確認してください。'
-        : code === 429 ? '利用上限に達しました。少し待ってからもう一度試してください。'
-          : code >= 500 ? 'Gemini側で問題が起きています。少し待ってからもう一度試してください。' : '';
-    throw new AiError([`AIの呼び出しに失敗しました(エラー ${code})。`, hint, detail].filter(Boolean).join('\n'));
+    const hint = [400, 401, 403].includes(code) ? t('aiKeyHint')
+      : code === 404 ? t('aiModelHint')
+        : code === 429 ? t('aiLimitHint')
+          : code >= 500 ? t('aiServerHint') : '';
+    throw new AiError([t('aiFailed', { code }), hint, detail].filter(Boolean).join('\n'));
   }
   return JSON.parse(raw);
 }
@@ -146,6 +147,6 @@ export function chatPrompt(memoText, p) {
 export function extractJson(text) {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start < 0 || end < start) throw new AiError('AIの応答を読み取れませんでした。もう一度試してください。');
+  if (start < 0 || end < start) throw new AiError(t('aiUnreadable'));
   return JSON.parse(text.slice(start, end + 1));
 }

@@ -2,6 +2,7 @@
 import { db } from './db.js';
 import * as ai from './ai.js';
 import { dateKey, defaultTag, graphemes, parseDateKey, todayKey, uuid, formatTime } from './util.js';
+import { t, setLang } from './i18n.js';
 
 // ---- 人物(AI character) ----
 
@@ -30,7 +31,17 @@ export function authorOf(current, by, icon) {
   return { ...DEFAULT_PERSONA, name: by, icon, image: '' };
 }
 
-const DEFAULT_WORDS = ['アイデア', 'やること', '買うもの', '思い出した', 'あとで調べる', '重要', '気づき'];
+/** 言語ごとの初期の簡単ワードとタグ。まだ自分で変えていなければ、言語を変えた時に入れ替える */
+const DEFAULT_WORDS = {
+  en: ['Idea', 'To do', 'To buy', 'Remembered', 'Look up later', 'Important', 'Insight'],
+  ja: ['アイデア', 'やること', '買うもの', '思い出した', 'あとで調べる', '重要', '気づき'],
+  zh: ['想法', '待办', '要买的', '想起来了', '稍后查', '重要', '发现'],
+};
+const DEFAULT_TAGS = {
+  en: ['Ideas', 'Walk', 'To-do', 'Insight', 'Work', 'Diary'],
+  ja: ['アイデア', '散歩', 'やること', '気づき', '作品', '日記'],
+  zh: ['想法', '散步', '待办', '发现', '作品', '日记'],
+};
 
 const DEFAULT_SETTINGS = {
   apiKey: '',
@@ -40,11 +51,56 @@ const DEFAULT_SETTINGS = {
   profileImage: '',
   calendarHidden: false,
   persona: DEFAULT_PERSONA,
+  language: 'en',
+  textSize: 'm',
 };
+
+/** 文字の大きさ(設定の S / M / L / XL) */
+export const TEXT_SIZES = { s: 0.9, m: 1, l: 1.15, xl: 1.3 };
 
 const TRASH_DAYS = 30;
 
 // ---- 本文(ブロック) ----
+
+/** ブロックの形式。DIVIDER は Android 版では「---」の段落として見える */
+export const BLOCK_TYPES = ['PARAGRAPH', 'HEADING1', 'HEADING2', 'BULLET', 'NUMBERED', 'TODO', 'QUOTE', 'DIVIDER'];
+
+export function block(type = 'PARAGRAPH', text = '', extra = {}) {
+  return { id: uuid(), type, text: type === 'DIVIDER' ? '---' : text, checked: false, image: '', comment: '', ...extra };
+}
+
+/** 行頭の記号(Notion と同じ書き方)と形式 */
+export const SHORTCUTS = [
+  [/^##\s/, 'HEADING2'], [/^#\s/, 'HEADING1'], [/^[-*・]\s?/, 'BULLET'], [/^\d+[.)]\s/, 'NUMBERED'],
+  [/^\[\s?\]\s?/, 'TODO'], [/^\[x\]\s?/i, 'TODO_DONE'], [/^>\s?/, 'QUOTE'],
+];
+
+/**
+ * 入力欄の文章をブロックに分ける。「- 」「1. 」「# 」などで始まる行はその形式に、
+ * 「---」は区切り線に、ほかの続いた行は1つの段落(改行を含む)にする
+ */
+export function parseBlocks(text) {
+  const out = [];
+  let para = [];
+  const flush = () => {
+    if (para.length) out.push(block('PARAGRAPH', para.join('\n')));
+    para = [];
+  };
+  for (const line of text.replace(/\s+$/, '').split('\n')) {
+    if (/^(-{3,}|—-+)$/.test(line.trim())) { flush(); out.push(block('DIVIDER')); continue; }
+    const hit = SHORTCUTS.find(([re]) => re.test(line));
+    // 「・」だけは空白なしでも箇条書きにする。ほかは記号の後に空白が必要
+    if (hit && !(hit[1] === 'BULLET' && /^[-*]\S/.test(line))) {
+      flush();
+      const rest = line.replace(hit[0], '');
+      out.push(hit[1] === 'TODO_DONE' ? block('TODO', rest, { checked: true }) : block(hit[1], rest));
+    } else {
+      para.push(line);
+    }
+  }
+  flush();
+  return out;
+}
 
 /** 検索・共有・AI に使うプレーンテキスト(Android 版の toPlainText と同じ) */
 export function toPlainText(blocks) {
@@ -53,6 +109,7 @@ export function toPlainText(blocks) {
     n = b.type === 'NUMBERED' ? n + 1 : 0;
     switch (b.type) {
       case 'IMAGE': return null;
+      case 'DIVIDER': return '---';
       case 'BULLET': return `・${b.text}`;
       case 'NUMBERED': return `${n}. ${b.text}`;
       case 'TODO': return (b.checked ? '☑ ' : '☐ ') + b.text;
@@ -109,7 +166,7 @@ export const state = {
   memos: [],
   settings: { ...DEFAULT_SETTINGS },
   tags: [],
-  quickWords: DEFAULT_WORDS.map((text) => ({ text, uses: 0 })),
+  quickWords: DEFAULT_WORDS.en.map((text) => ({ text, uses: 0 })),
   dayNotes: {},
   busy: null, // {memoId, task}
   dayBusy: null, // {date, jung}
@@ -156,9 +213,10 @@ export async function init() {
   for (const m of expired) await deleteForever(m.id, all);
   state.memos = all.filter((m) => !expired.includes(m));
   state.settings = { ...DEFAULT_SETTINGS, ...(settings ?? {}), persona: { ...DEFAULT_PERSONA, ...(settings?.persona ?? {}) } };
-  state.tags = tags ?? DEFAULT_TAGS.map(defaultTag);
+  setLang(state.settings.language);
+  state.tags = tags ?? DEFAULT_TAGS[state.settings.language].map(defaultTag);
   if (!tags) db.set('tags', state.tags);
-  if (words) state.quickWords = words;
+  state.quickWords = words ?? DEFAULT_WORDS[state.settings.language].map((text) => ({ text, uses: 0 }));
   state.dayNotes = notes ?? {};
   state.ready = true;
   emit();
@@ -228,12 +286,12 @@ function removeMemoNow(id) {
   emit();
 }
 
-/** 入力欄から投稿する。文章は改行ごと1つの段落、写真、タグ */
+/** 入力欄から投稿する。「- 」などで始まる行はリストなどのブロックに、写真、タグ */
 export function post(text, images, tags) {
   if (!text.trim() && images.length === 0) return null;
   const blocks = [
-    ...(text.trim() ? [{ id: uuid(), type: 'PARAGRAPH', text: text.trim(), checked: false, image: '', comment: '' }] : []),
-    ...images.map((image) => ({ id: uuid(), type: 'IMAGE', text: '', checked: false, image, comment: '' })),
+    ...(text.trim() ? parseBlocks(text.trim()) : []),
+    ...images.map((image) => block('IMAGE', '', { image })),
   ];
   return addMemo(newMemo({ blocks, body: toPlainText(blocks), tags: [...new Set(tags)] }));
 }
@@ -244,7 +302,7 @@ export function diaryFor(key) {
   if (found) return found;
   const d = parseDateKey(key);
   d.setHours(12, 0, 0, 0);
-  return addMemo(newMemo({ allDay: true, createdAt: d.getTime(), blocks: [{ id: uuid(), type: 'PARAGRAPH', text: '', checked: false, image: '', comment: '' }] }));
+  return addMemo(newMemo({ allDay: true, createdAt: d.getTime(), blocks: [block()] }));
 }
 
 export function newPostOn(key) {
@@ -254,20 +312,32 @@ export function newPostOn(key) {
   return addMemo(newMemo({ createdAt: key === todayKey() ? Date.now() : d.getTime() }));
 }
 
-/** 詳細画面で編集する本文。普通の段落だけならそのまま、ほかの形式は文字に直して1つの欄に */
-export function editableText(memo) {
-  return toPlainText(memo.blocks.filter((b) => b.type !== 'IMAGE'));
+/** 詳細画面のブロックエディタからの保存(打つたびに呼ばれるので、書き込みは少し待ってまとめる) */
+export function setMemoBlocks(id, blocks) {
+  return updateMemo(id, (m) => ({ ...m, blocks, body: toPlainText(blocks) }), 400);
 }
 
-export function setMemoContent(id, { title, text, images }) {
+export function setMemoTitle(id, title) {
+  return updateMemo(id, (m) => ({ ...m, title }), 400);
+}
+
+/** 本文の最後に文章を足す(AI の文章を本文へ、など) */
+export function appendText(id, text) {
   return updateMemo(id, (m) => {
-    const imgs = images ?? memoImages(m);
-    const blocks = [
-      { id: m.blocks.find((b) => b.type === 'PARAGRAPH')?.id ?? uuid(), type: 'PARAGRAPH', text: text ?? editableText(m), checked: false, image: '', comment: '' },
-      ...imgs.map((image) => ({ id: uuid(), type: 'IMAGE', text: '', checked: false, image, comment: '' })),
-    ];
-    return { ...m, title: title ?? m.title, blocks, body: toPlainText(blocks) };
-  }, 400);
+    const last = m.blocks[m.blocks.length - 1];
+    // 最後が空の段落なら、そこに入れる
+    const base = last && last.type === 'PARAGRAPH' && !last.text.trim() ? m.blocks.slice(0, -1) : m.blocks;
+    const blocks = [...base, ...parseBlocks(text)];
+    return { ...m, blocks, body: toPlainText(blocks) };
+  });
+}
+
+/** 本文を文章で置き換える。写真は残す */
+export function replaceText(id, text) {
+  return updateMemo(id, (m) => {
+    const blocks = [...parseBlocks(text), ...m.blocks.filter((b) => b.type === 'IMAGE')];
+    return { ...m, blocks, body: toPlainText(blocks) };
+  });
 }
 
 export function setMemoTags(id, tags) {
@@ -313,8 +383,6 @@ export async function emptyTrash() {
 // タグ: 設定の「Tags」で管理する、決まった分類。AI もこの中からしか選ばない。
 // #ハッシュタグ: 本文に「#銀杏」のように書くだけ。いくつでも自由に作れ、押すと検索できる。
 
-/** 初めて開いた時のタグ(あとから自由に変えられる) */
-const DEFAULT_TAGS = ['アイデア', '散歩', 'やること', '気づき', '作品', '日記'];
 
 export function tagInfo(name) {
   return state.tags.find((t) => t.name === name) ?? defaultTag(name);
@@ -380,10 +448,8 @@ export function unlistedTags() {
 export function tagToHashtag(name) {
   const tag = `#${name.replace(/\s+/g, '_')}`;
   activeMemos().filter((m) => m.tags.includes(name)).forEach((m) => {
-    const text = editableText(m);
-    const next = hashtagsIn(text).includes(tag.slice(1)) ? text : `${text}${text.trim() ? '\n' : ''}${tag}`;
-    setMemoContent(m.id, { text: next });
-    updateMemo(m.id, (x) => ({ ...x, tags: x.tags.filter((t) => t !== name) }));
+    if (!hashtagsIn(m.body).includes(tag.slice(1))) appendText(m.id, tag);
+    updateMemo(m.id, (x) => ({ ...x, tags: x.tags.filter((n) => n !== name) }));
   });
 }
 
@@ -415,9 +481,29 @@ export function setQuickWords(words) {
 // ---- 設定 ----
 
 export function updateSettings(patch) {
+  const from = state.settings.language;
   state.settings = { ...state.settings, ...patch };
+  if (patch.language) {
+    setLang(patch.language);
+    swapDefaults(from, patch.language);
+  }
   db.set('settings', state.settings);
   emit();
+}
+
+/** 初期のタグと簡単ワードを、まだ使っていなければ新しい言語のものに入れ替える */
+function swapDefaults(from, to) {
+  if (from === to) return;
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const used = new Set(state.memos.flatMap((m) => m.tags));
+  if (same(state.tags.map((x) => x.name), DEFAULT_TAGS[from] ?? []) && !state.tags.some((x) => used.has(x.name))) {
+    state.tags = DEFAULT_TAGS[to].map(defaultTag);
+    db.set('tags', state.tags);
+  }
+  if (same(state.quickWords.map((w) => w.text), DEFAULT_WORDS[from] ?? []) && state.quickWords.every((w) => !w.uses)) {
+    state.quickWords = DEFAULT_WORDS[to].map((text) => ({ text, uses: 0 }));
+    db.set('quickWords', state.quickWords);
+  }
 }
 
 export function updatePersona(patch) {
@@ -466,7 +552,7 @@ export async function importImage(file) {
     await db.putImage(name, blob);
     return name;
   } catch {
-    say('写真を読み込めませんでした。');
+    say(t('photoFailed'));
     return null;
   } finally {
     URL.revokeObjectURL(url);
@@ -477,7 +563,7 @@ export async function importImage(file) {
 
 function needKey() {
   if (state.settings.apiKey.trim()) return false;
-  say('AIを使うには、設定で Gemini の APIキーを入れてください。');
+  say(t('needKey'));
   return true;
 }
 
@@ -486,14 +572,14 @@ async function runAi(id, task, fn) {
   const memo = getMemo(id);
   if (!memo) return;
   if (!memo.title.trim() && !memo.body.trim()) {
-    say('メモがまだ空です。何か書いてから試してください。');
+    say(t('memoEmpty'));
     return;
   }
   setState({ busy: { memoId: id, task } });
   try {
     await fn(memo, state.settings.apiKey.trim(), state.settings.model);
   } catch (e) {
-    say(e instanceof ai.AiError ? e.message : 'AIの応答を読み取れませんでした。もう一度試してください。');
+    say(e instanceof ai.AiError ? e.message : t('aiUnreadable'));
   } finally {
     setState({ busy: null });
   }
@@ -503,7 +589,7 @@ const userTurn = (memo) => [{ fromUser: true, text: plainText(memo) }];
 
 export function commentOn(id) {
   return runAi(id, 'comment', async (memo, key, model) => {
-    if (!memo.body.trim()) { say('コメントできる本文がまだありません。'); return; }
+    if (!memo.body.trim()) { say(t('noBody')); return; }
     const p = state.settings.persona;
     const text = await ai.generate(key, model, ai.commentPrompt(p), userTurn(memo));
     updateMemo(id, (m) => ({ ...m, aiComment: text, aiCommentBy: p.name, aiCommentIcon: personaGlyph(p), blocks: m.blocks.map((b) => ({ ...b, comment: '' })) }));
@@ -555,7 +641,7 @@ export async function sendChat(id, text) {
     return true;
   } catch (e) {
     updateMemo(id, (m) => ({ ...m, chat: memo.chat }));
-    say(e instanceof ai.AiError ? e.message : 'AIの応答を読み取れませんでした。');
+    say(e instanceof ai.AiError ? e.message : t('aiUnreadable'));
     return false;
   } finally {
     setState({ busy: null });
@@ -566,7 +652,7 @@ export async function sendChat(id, text) {
 export async function reviewDay(key, jung) {
   if (state.dayBusy || needKey()) return;
   const posts = activeMemos().filter((m) => memoDate(m) === key && !isBlank(m)).sort((a, b) => a.createdAt - b.createdAt);
-  if (!posts.length) { say('この日の投稿はまだありません。'); return; }
+  if (!posts.length) { say(t('noDayPosts')); return; }
   const text = posts.map((m) => `【${m.allDay ? 'Diary' : formatTime(m.createdAt)}】\n${plainText(m)}`).join('\n\n').slice(0, 30000);
   const p = state.settings.persona;
   setState({ dayBusy: { date: key, jung } });
@@ -575,7 +661,7 @@ export async function reviewDay(key, jung) {
     const note = state.dayNotes[key] ?? { summary: '', jung: '', jungBy: '', jungIcon: '' };
     setDayNote(key, jung ? { ...note, jung: result, jungBy: p.name, jungIcon: personaGlyph(p) } : { ...note, summary: result });
   } catch (e) {
-    say(e instanceof ai.AiError ? e.message : 'AIの応答を読み取れませんでした。');
+    say(e instanceof ai.AiError ? e.message : t('aiUnreadable'));
   } finally {
     setState({ dayBusy: null });
   }
@@ -600,14 +686,14 @@ export async function reviewPeriod(startKey, endKey, label) {
   if (state.reviewBusy || needKey()) return;
   const target = activeMemos().filter((m) => { const k = memoDate(m); return k >= startKey && k <= endKey && !isBlank(m); })
     .sort((a, b) => a.createdAt - b.createdAt);
-  if (!target.length) { say(`${label}のメモはありません。`); return; }
+  if (!target.length) { say(t('noPeriodPosts', { label })); return; }
   const text = target.map((m) => `【${memoDate(m)} ${m.allDay ? 'Diary' : formatTime(m.createdAt)}】\n${plainText(m)}`).join('\n\n').slice(0, 30000);
   setState({ reviewBusy: true });
   try {
     const result = await ai.generate(state.settings.apiKey.trim(), state.settings.model, ai.REVIEW, [{ fromUser: true, text }]);
     setState({ review: { label, text: result } });
   } catch (e) {
-    say(e instanceof ai.AiError ? e.message : 'AIの応答を読み取れませんでした。');
+    say(e instanceof ai.AiError ? e.message : t('aiUnreadable'));
   } finally {
     setState({ reviewBusy: false });
   }
@@ -616,7 +702,7 @@ export async function reviewPeriod(startKey, endKey, label) {
 export function saveReview() {
   const r = state.review;
   if (!r) return;
-  const blocks = [{ id: uuid(), type: 'PARAGRAPH', text: `${r.text}\n\n#振り返り`, checked: false, image: '', comment: '' }];
-  addMemo(newMemo({ title: `振り返り ${r.label}`, blocks, body: toPlainText(blocks) }));
-  setState({ review: null, message: '振り返りをメモとして保存しました。' });
+  const blocks = [...parseBlocks(r.text), block('PARAGRAPH', t('reviewTag'))];
+  addMemo(newMemo({ title: t('reviewTitle', { label: r.label }), blocks, body: toPlainText(blocks) }));
+  setState({ review: null, message: t('reviewSaved') });
 }

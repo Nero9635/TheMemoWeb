@@ -3,6 +3,7 @@
 import { db } from './db.js';
 import { state, normalizeMemo, memoImages, setState, say } from './store.js';
 import { todayKey } from './util.js';
+import { t } from './i18n.js';
 
 // Android 版の設定の名前と、この版の設定の対応
 const KEYS = {
@@ -11,6 +12,8 @@ const KEYS = {
   profile_name: 'profileName',
   profile_image: 'profileImage',
   calendar_hidden: 'calendarHidden',
+  web_language: 'language',
+  web_text_size: 'textSize',
 };
 
 function settingsJson(includeApiKey) {
@@ -71,9 +74,9 @@ export async function backup(full = false, includeApiKey = false) {
   try {
     const blob = await buildZip({ full, includeApiKey });
     const name = `${full ? 'thememo-all' : 'thememo-backup'}-${todayKey()}.zip`;
-    if (await saveFile(blob, name)) say(full ? '設定も含めて、すべてを書き出しました。' : 'バックアップを書き出しました。');
+    if (await saveFile(blob, name)) say(full ? t('backedUpAll') : t('backedUp'));
   } catch {
-    say('バックアップを作れませんでした。');
+    say(t('backupFailed'));
   }
 }
 
@@ -83,7 +86,7 @@ export async function restore(file) {
   try {
     zip = await JSZip.loadAsync(file);
   } catch {
-    say('zip ファイルを開けませんでした。');
+    say(t('notZip'));
     return;
   }
   const read = async (name) => {
@@ -92,7 +95,7 @@ export async function restore(file) {
   };
   const memos = await read('memos.json');
   if (!Array.isArray(memos)) {
-    say('The Memo のバックアップではありません。');
+    say(t('notBackup'));
     return;
   }
   // 写真
@@ -130,7 +133,7 @@ export async function restore(file) {
   }
   state.dayNotes = merged;
   await db.set('dayNotes', merged);
-  const message = `${memos.length}件のメモを読み込みました。同じメモは新しい方を残しています。`;
+  const message = t('restored', { n: memos.length });
   const settings = await read('settings.json');
   setState({ pendingSettings: settings ? { settings, message } : null, message: settings ? null : message });
 }
@@ -147,7 +150,7 @@ export async function applySettings(json) {
   }
   state.settings = s;
   await db.set('settings', s);
-  setState({ pendingSettings: null, message: '設定・プロフィール・AIの人物を戻しました。' });
+  setState({ pendingSettings: null, message: t('settingsRestored') });
 }
 
 export function yearsWithMemos() {
@@ -170,7 +173,7 @@ export async function archiveYear(year) {
     const count = JSON.parse(await check.file('memos.json').async('string')).length;
     if (count !== target.length) throw new Error('count mismatch');
     if (!(await saveFile(blob, `thememo-${year}.zip`))) return;
-    if (!confirm(`${year}年のファイルを保存できましたか?\n「OK」で、${target.length}件のメモをこの端末から外します。`)) return;
+    if (!confirm(t('archiveConfirm', { y: year, n: target.length }))) return;
     const ids = new Set(target.map((m) => m.id));
     state.memos = state.memos.filter((m) => !ids.has(m.id));
     for (const id of ids) await db.deleteMemo(id);
@@ -180,8 +183,8 @@ export async function archiveYear(year) {
     Object.keys(notes).forEach((k) => delete rest[k]);
     state.dayNotes = rest;
     await db.set('dayNotes', rest);
-    say(`${year}年のメモ${target.length}件を保管し、端末から外しました。「Restore」でいつでも戻せます。`);
+    say(t('archived', { y: year, n: target.length }));
   } catch {
-    say('保管できませんでした。端末のメモは消していません。');
+    say(t('archiveFailed'));
   }
 }

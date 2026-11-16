@@ -1,8 +1,9 @@
-// 画面の切り替え、テーマ、共通のダイアログ
+// 画面の切り替え、テーマ・文字の大きさ・言語、共通のダイアログ
 import { html, render, useEffect } from '../vendor/preact-htm.js';
 import * as S from './store.js';
 import * as B from './backup.js';
 import { useStore } from './ui.js';
+import { t } from './i18n.js';
 import { Home } from './home.js';
 import { Detail, Chat } from './detail.js';
 import { Settings, Character, Search, Trash, QuickWords, Tags } from './settings.js';
@@ -24,40 +25,41 @@ function Screen({ s }) {
 function App() {
   const st = useStore();
 
-  // テーマ(System / Light / Dark)
+  // テーマ(System / Light / Dark)と文字の大きさ
   useEffect(() => {
     document.documentElement.dataset.theme = st.settings.theme;
-  }, [st.settings.theme]);
+    document.documentElement.style.setProperty('--ts', String(S.TEXT_SIZES[st.settings.textSize] ?? 1));
+  }, [st.settings.theme, st.settings.textSize]);
 
   if (!st.ready) return html`<div class="loading"></div>`;
   const top = st.stack[st.stack.length - 1];
   return html`
-    <div class="stack">
+    <div class="stack" key=${st.settings.language}>
       <${Screen} s=${top} />
     </div>
     ${st.message && html`<div class="backdrop center" onClick=${() => S.setState({ message: null })}>
-      <div class="alert" role="alertdialog" aria-label="Message" onClick=${(e) => e.stopPropagation()}>
+      <div class="alert glass" role="alertdialog" aria-label=${t('message')} onClick=${(e) => e.stopPropagation()}>
         <p class="pre">${st.message}</p>
-        <div class="alert-buttons"><button class="strong" onClick=${() => S.setState({ message: null })}>OK</button></div>
+        <div class="alert-buttons"><button class="strong" onClick=${() => S.setState({ message: null })}>${t('ok')}</button></div>
       </div></div>`}
     ${st.review && html`<div class="backdrop center" onClick=${() => S.setState({ review: null })}>
-      <div class="alert wide" role="alertdialog" aria-label="Review" onClick=${(e) => e.stopPropagation()}>
-        <div class="alert-title">Review ${st.review.label}</div>
+      <div class="alert glass wide" role="alertdialog" aria-label=${t('review', { label: st.review.label })} onClick=${(e) => e.stopPropagation()}>
+        <div class="alert-title">${t('review', { label: st.review.label })}</div>
         <div class="alert-scroll pre">${st.review.text}</div>
-        <div class="alert-buttons"><button onClick=${() => S.setState({ review: null })}>Close</button><button class="strong" onClick=${S.saveReview}>Save as memo</button></div>
+        <div class="alert-buttons"><button onClick=${() => S.setState({ review: null })}>${t('close')}</button><button class="strong" onClick=${S.saveReview}>${t('saveAsMemo')}</button></div>
       </div></div>`}
     ${st.pendingSettings && html`<div class="backdrop center">
-      <div class="alert" role="alertdialog" aria-label="Restore settings">
-        <div class="alert-title">Restore settings too?</div>
-        <p class="pre">${st.pendingSettings.message}\n\nこのバックアップには、設定・プロフィール・AIの人物${st.pendingSettings.settings.gemini_api_key ? '・APIキー' : ''}も入っています。今の設定を置き換えますか?</p>
-        <div class="alert-buttons"><button onClick=${() => S.setState({ pendingSettings: null })}>Memos only</button>
-          <button class="strong" onClick=${() => B.applySettings(st.pendingSettings.settings)}>Restore settings</button></div>
+      <div class="alert glass" role="alertdialog" aria-label=${t('restoreSettingsQ')}>
+        <div class="alert-title">${t('restoreSettingsQ')}</div>
+        <p class="pre">${st.pendingSettings.message}\n\n${t('restoreSettingsText', { key: st.pendingSettings.settings.gemini_api_key ? t('andKey') : '' })}</p>
+        <div class="alert-buttons"><button onClick=${() => S.setState({ pendingSettings: null })}>${t('memosOnly')}</button>
+          <button class="strong" onClick=${() => B.applySettings(st.pendingSettings.settings)}>${t('restoreSettings')}</button></div>
       </div></div>`}
   `;
 }
 
 /**
- * iPhone ではキーボードが出ても画面の高さが変わらないので、
+ * iPhone / iPad ではキーボードが出ても画面の高さが変わらないので、
  * 見えている高さに合わせて、下の入力欄がキーボードの上に来るようにする
  */
 function fitViewport() {
