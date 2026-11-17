@@ -122,7 +122,7 @@ function noPageBounce() {
     e.preventDefault(); // スクロールできる箱がない所では、画面全体を動かさない
   }, { passive: false });
 }
-noPageBounce();
+// noPageBounce(); // v27: 文字入力の原因を切り分けるため、いったん止めている
 
 // アプリを閉じる・ほかのアプリに切り替える時は、書きかけの変更をすぐ保存する
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') S.flushSaves(); });

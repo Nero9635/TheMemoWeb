@@ -173,18 +173,12 @@ function placeCaret(blockEl, pos) {
 
 // ---------- エディタ ----------
 
-export function BlockEditor({ memo, focusRef, onExitTop }) {
+export function BlockEditor({ memo, focusRef }) {
   const host = useRef();
   const rootRef = useRef(null);
   const lastCaret = useRef(null); // {id, pos}
-  const [slash, setSlashState] = useState(null); // {id, top, left, q, index}
-  const slashRef = useRef(null);
-  const setSlash = (v) => { slashRef.current = v; setSlashState(v); };
+  const [slash, setSlash] = useState(null); // {id, top, left}
   const [menuFor, setMenuFor] = useState(null); // 写真・区切り線を押した時のメニュー
-  const exitTop = useRef(onExitTop);
-  exitTop.current = onExitTop;
-  // 元に戻す / やり直す(Notion と同じく、自分で持つ。ブラウザの取り消しは組み替えに対応できないため)
-  const hist = useRef({ undo: [], redo: [], lastAt: 0 });
 
   const root = () => rootRef.current;
   const blockOf = (node) => {
@@ -200,25 +194,11 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     const sel = window.getSelection();
     if (!sel.rangeCount || !root()?.contains(sel.anchorNode)) return null;
     const r = sel.getRangeAt(0);
-    let el;
-    let pos;
-    if (r.startContainer === root()) {
-      // 行と行の間を指している時は、その行の頭(最後なら最後の行の終わり)
-      const kids = root().children;
-      if (!kids.length) return null;
-      const i = Math.min(r.startOffset, kids.length - 1);
-      el = kids[i];
-      pos = r.startOffset >= kids.length ? textOf(el).length : 0;
-    } else {
-      el = blockOf(r.startContainer);
-      if (!el) return null;
-      pos = offsetIn(el, r.startContainer, r.startOffset);
-    }
-    const endEl = r.collapsed ? el : (r.endContainer === root() ? root().children[Math.max(0, r.endOffset - 1)] : blockOf(r.endContainer));
-    return { el, pos, collapsed: r.collapsed, endEl: endEl ?? el };
+    const el = blockOf(r.startContainer);
+    if (!el) return null;
+    return { el, pos: offsetIn(el, r.startContainer, r.startOffset), collapsed: r.collapsed };
   };
   const currentEl = () => caret()?.el ?? (lastCaret.current && byId(lastCaret.current.id)) ?? null;
-  const textBlock = (el) => el && TEXT_TYPES.includes(el.dataset.type);
 
   /** 文書の並びを読んで保存する */
   const save = () => {
@@ -230,96 +210,11 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     S.setMemoBlocks(memo.id, blocks);
   };
 
-  // ---- 元に戻す ----
-  const snapshot = () => {
-    const c = caret();
-    return { blocks: [...root().children].map(readBlock), caret: c ? { id: c.el.dataset.id, pos: c.pos } : lastCaret.current };
-  };
-  /** 変える前の状態を残す。文字を打ち続けている間は 1 回だけ(1 秒休むと次の区切り) */
-  const record = (force) => {
-    const h = hist.current;
-    const now = Date.now();
-    const quiet = now - h.lastAt > 1000;
-    h.lastAt = now;
-    if (!force && !quiet) return;
-    h.undo.push(snapshot());
-    if (h.undo.length > 200) h.undo.shift();
-    h.redo = [];
-  };
-  const restore = (snap) => {
-    root().replaceChildren(...snap.blocks.map((b) => makeBlock(b)));
-    const target = (snap.caret && byId(snap.caret.id)) || root().lastElementChild;
-    if (target && textBlock(target)) placeCaret(target, Math.min(snap.caret?.pos ?? 0, textOf(target).length));
-    save();
-    keepCaretVisible();
-  };
-  const undo = () => {
-    const h = hist.current;
-    if (!h.undo.length) return;
-    h.redo.push(snapshot());
-    restore(h.undo.pop());
-    h.lastAt = 0;
-  };
-  const redo = () => {
-    const h = hist.current;
-    if (!h.redo.length) return;
-    h.undo.push(snapshot());
-    restore(h.redo.pop());
-    h.lastAt = 0;
-  };
-
-  const shiftDown = useRef(false);
-  const pending = useRef(null); // {ids, anchorId, blocks, focus} iPad がキーを処理したあとに作り直す形
-  const pendingTimer = useRef(0);
-  /** 予定していた形に作り直す。iPad がキーで変えた所(関係する行・新しくできた行・行の外の文字)を消して、正しい行を置く */
-  const applyPending = () => {
-    const p = pending.current;
-    if (!p) return;
-    pending.current = null;
-    clearTimeout(pendingTimer.current);
-    const el = root();
-    if (!el) return;
-    // まわりの行: キーの前と同じならその要素をそのまま使う(写真を読み直さない)。変わっていたら前の形に戻す
-    const same = (node, snap) => node && node.isConnected && node.parentNode === el && JSON.stringify(readBlock(node)) === JSON.stringify(snap);
-    const keepPrev = p.prev.map(({ node, snap }) => (same(node, snap) ? node : makeBlock(snap)));
-    const keepNext = p.next.map(({ node, snap }) => (same(node, snap) ? node : makeBlock(snap)));
-    const made = p.blocks.map((b) => makeBlock(b));
-    const anchorOk = p.anchor && p.anchor.isConnected && p.anchor.parentNode === el;
-    // キーで変わった所(関係する行・まわりの行・新しくできた行・行の外の文字)をいったん外す
-    const seen = new Set();
-    for (const n of [...el.childNodes]) {
-      const id = n.nodeType === 1 ? n.dataset?.id : null;
-      if (n === p.anchor) { seen.add(id); continue; }
-      if (!id || !n.classList.contains('blk') || p.ids.has(id) || seen.has(id)) { n.remove(); continue; }
-      seen.add(id);
-    }
-    const list = [...keepPrev, ...made, ...keepNext];
-    if (anchorOk) p.anchor.after(...list);
-    else if (p.anchorIndex === 0) el.prepend(...list);
-    else {
-      // 目印の行がなくなっていた時(まれ): 元の位置の番号で入れる
-      const ref = el.children[p.anchorIndex] ?? null;
-      list.forEach((x) => el.insertBefore(x, ref));
-    }
-    if (!el.children.length) el.appendChild(makeBlock(S.block()));
-    if (p.focus) {
-      const target = made.find((m) => m.dataset.id === p.focus.id) ?? byId(p.focus.id);
-      if (target) placeCaret(target, Math.min(p.focus.pos, textOf(target).length));
-    }
-    save();
-    keepCaretVisible();
-    markEmpty();
-  };
-
-  // 変換(日本語・ピンイン)の最中は true。この間はカーソルも文字も一切さわらない(ProseMirror と同じ原則)
-  const composing = useRef(false);
-
   /** 書ける面の中を、いつも「ブロックの並び」に保つ(ブラウザが直接文字や <br> を置いた時など) */
   const normalize = () => {
     const el = root();
     const c = caret();
-    let keep = c ? { el: c.el, pos: c.pos } : null;
-    const sel = window.getSelection();
+    const keep = c ? { el: c.el, pos: c.pos } : null;
     let changed = false;
     const seen = new Set();
     for (const n of [...el.childNodes]) {
@@ -328,47 +223,21 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
         seen.add(n.dataset.id);
         continue;
       }
-      // 行の外に置かれた文字・<br>・ブラウザが作った div:
-      // 隣の行の中へ移す。カーソルがその中にあれば、打っていた位置をそのまま保つ
+      if (n.nodeType === 3 && !n.data.trim() && n.data !== ' ') { n.remove(); continue; }
+      // 迷子の文字・<br>・ブラウザが作った div を段落にする
       const text = n.nodeType === 3 ? n.data : n.nodeName === 'BR' ? '' : textOf(n);
-      const hasCaret = sel.rangeCount && (sel.anchorNode === n || n.contains?.(sel.anchorNode));
-      const caretInN = hasCaret ? (n.nodeType === 3 ? sel.anchorOffset : offsetIn(n, sel.anchorNode, sel.anchorOffset)) : 0;
-      const prev = n.previousSibling;
-      const next = n.nextSibling;
+      const nb = makeBlock(S.block('PARAGRAPH', text));
+      el.replaceChild(nb, n);
+      seen.add(nb.dataset.id);
       changed = true;
-      if (!text) { n.remove(); continue; }
-      // 行と行の間の文字は、iPad がカーソルを「下の行の頭」として扱っていた所に入ったもの。
-      // 覚えていた位置ではなく、実際にある場所で決める: 下の行の頭へ(下に行がなければ上の行の末尾へ)
-      if (next && next.nodeType === 1 && textBlock(next)) {
-        const nt = readBlock(next).text;
-        fillText(next, text + nt, false);
-        n.remove();
-        if (hasCaret) keep = { el: next, pos: caretInN };
-      } else if (prev && prev.nodeType === 1 && textBlock(prev)) {
-        const pt = readBlock(prev).text;
-        fillText(prev, pt + text, false);
-        n.remove();
-        if (hasCaret) keep = { el: prev, pos: pt.length + caretInN };
-      } else if (next && next.nodeType === 1 && textBlock(next)) {
-        const nt = readBlock(next).text;
-        fillText(next, text + nt, false);
-        n.remove();
-        if (hasCaret) keep = { el: next, pos: caretInN };
-      } else {
-        const nb = makeBlock(S.block('PARAGRAPH', text));
-        el.replaceChild(nb, n);
-        seen.add(nb.dataset.id);
-        if (hasCaret) keep = { el: nb, pos: caretInN };
-      }
-      if (hasCaret) placeCaret(keep.el, keep.pos);
+      if (keep && (keep.el === n || n.contains?.(keep.el))) { keep.el = nb; }
     }
     // ブラウザが行の中に作った飾り(span・font など)は外して、文字だけに戻す
     for (const blk of el.children) {
-      if (!textBlock(blk)) continue;
-      if (![...blk.childNodes].some((x) => x.nodeType === 1 && x.nodeName !== 'BR')) continue;
+      if (!TEXT_TYPES.includes(blk.dataset.type)) continue;
+      if (![...blk.childNodes].some((n) => n.nodeType === 1 && n.nodeName !== 'BR')) continue;
       const isCaret = keep && keep.el === blk;
       fillText(blk, textOf(blk), false);
-      changed = true;
       if (isCaret) placeCaret(blk, Math.min(keep.pos, textOf(blk).length));
     }
     if (!el.children.length) {
@@ -376,10 +245,7 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       placeCaret(el.firstChild, 0);
       return true;
     }
-    if (changed && keep && el.contains(keep.el) && document.activeElement === el) {
-      const s = window.getSelection();
-      if (!s.rangeCount || !el.contains(s.anchorNode)) placeCaret(keep.el, Math.min(keep.pos, textOf(keep.el).length));
-    }
+    if (changed && keep && el.contains(keep.el)) placeCaret(keep.el, Math.min(keep.pos, textOf(keep.el).length));
     return changed;
   };
 
@@ -401,8 +267,8 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
   /** カーソルが道具やキーボードに隠れた時だけ、隠れない所まで動かす(それ以外は画面を動かさない) */
   const keepCaretVisible = () => {
     const sel = window.getSelection();
-    if (!sel.rangeCount || !root()?.contains(sel.anchorNode)) return;
-    const sc = root().closest('.scroll');
+    if (!sel.rangeCount) return;
+    const sc = root()?.closest('.scroll');
     if (!sc) return;
     let rect = sel.getRangeAt(0).getBoundingClientRect();
     if (!rect.height) rect = blockOf(sel.anchorNode)?.getBoundingClientRect() ?? rect;
@@ -412,26 +278,11 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     else if (rect.top < box.top + margin) sc.scrollTop -= (box.top + margin) - rect.top;
   };
 
-  /** 空の行に、うすい案内(「/」でメニュー、見出し など)を出す */
-  const markEmpty = () => {
-    const el = root();
-    if (!el) return;
-    el.querySelectorAll(':scope > .ph').forEach((x) => x.classList.remove('ph'));
-    const c = caret();
-    if (!c || !c.collapsed || !textBlock(c.el) || textOf(c.el)) return;
-    const type = c.el.dataset.type;
-    const blank = el.children.length === 1;
-    c.el.dataset.ph = type === 'PARAGRAPH' ? (blank ? t('whatsHappening') : t('slashHint')) : TYPE_LABEL()[type];
-    c.el.classList.add('ph');
-  };
-
   // ---- はじめに一度だけ、書ける面を作る(Preact はこの中を書き換えない) ----
   useLayoutEffect(() => {
     const el = document.createElement('div');
     el.className = 'ce';
-    // 文字だけを書く面にする(iPad のキーボードに B / I / U が出ない。貼り付けや結合で飾りも入らない)
-    try { el.contentEditable = 'plaintext-only'; } catch { /* 使えないブラウザ */ }
-    if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
+    el.contentEditable = 'true';
     el.spellcheck = true;
     el.setAttribute('role', 'textbox');
     el.setAttribute('aria-multiline', 'true');
@@ -443,6 +294,156 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     host.current.appendChild(el);
     rootRef.current = el;
     return () => el.remove();
+  }, []);
+
+  // ---- 入力の前: Return・行頭の Backspace・コードの改行を、その場で組み替える ----
+  useEffect(() => {
+    const el = root();
+    const onBeforeInput = (e) => {
+      if (e.isComposing) return;
+      const c = caret();
+      if (!c) return;
+      const b = readBlock(c.el);
+      if (e.inputType === 'insertParagraph') {
+        e.preventDefault();
+        if (!c.collapsed) { document.execCommand('delete'); }
+        const cc = caret();
+        if (!cc) return;
+        const cur = readBlock(cc.el);
+        if (cur.type === 'CODE') { document.execCommand('insertLineBreak'); return; }
+        // 空のリストの項目で Return → リストを抜ける
+        if (LIST_TYPES.includes(cur.type) && !cur.text) {
+          replace([cc.el], [{ ...cur, type: 'PARAGRAPH', checked: false }], { id: cur.id, pos: 0 });
+          return;
+        }
+        const before = cur.text.slice(0, cc.pos);
+        const after = cur.text.slice(cc.pos);
+        const nextType = LIST_TYPES.includes(cur.type) ? cur.type : 'PARAGRAPH';
+        if (!before && after) {
+          // 行頭で Return: 上に空の行を足し、今の行はそのまま
+          const empty = S.block(nextType);
+          replace([cc.el], [empty, cur], { id: cur.id, pos: 0 });
+          return;
+        }
+        const nb = S.block(nextType, after);
+        replace([cc.el], [{ ...cur, text: before }, nb], { id: nb.id, pos: 0 });
+        return;
+      }
+      if (e.inputType === 'deleteContentBackward' && c.collapsed && c.pos === 0) {
+        // 行頭の Backspace: まず形式を外す
+        if (b.type !== 'PARAGRAPH' && TEXT_TYPES.includes(b.type)) {
+          e.preventDefault();
+          replace([c.el], [{ ...b, type: 'PARAGRAPH', checked: false }], { id: b.id, pos: 0 });
+          return;
+        }
+        const prev = c.el.previousElementSibling;
+        if (!prev) { e.preventDefault(); return; }
+        const p = readBlock(prev);
+        e.preventDefault();
+        if (p.type === 'DIVIDER') { prev.remove(); placeCaret(c.el, 0); save(); return; }
+        if (p.type === 'IMAGE') {
+          // 写真の下の空の行は消して、写真の上の行の最後へ
+          if (b.text) return;
+          let up = prev.previousElementSibling;
+          while (up && !TEXT_TYPES.includes(up.dataset.type)) up = up.previousElementSibling;
+          if (!c.el.nextElementSibling) return; // 写真の後ろに書ける行を残す
+          c.el.remove();
+          if (up) placeCaret(up, textOf(up).length);
+          save();
+          return;
+        }
+        // 前の行とつなぐ
+        replace([prev, c.el], [{ ...p, text: p.text + b.text }], { id: p.id, pos: p.text.length });
+      }
+    };
+    const onInput = (e) => {
+      if (e.isComposing) { save(); return; }
+      normalize();
+      if (!shortcut()) save();
+    };
+    const onCompositionEnd = () => setTimeout(() => { normalize(); if (!shortcut()) save(); }, 0);
+    // 行頭の記号で形式を変える・「---」で区切り線・空の行の「/」でメニュー
+    const shortcut = () => {
+      const c = caret();
+      if (!c || !c.collapsed) return false;
+      const b = readBlock(c.el);
+      if (b.type === 'CODE' || !TEXT_TYPES.includes(b.type)) return false;
+      if ((b.text === '/' || b.text === '／') && c.pos === 1) {
+        const r = c.el.getBoundingClientRect();
+        const hr = host.current.getBoundingClientRect();
+        setSlash({ id: b.id, top: r.bottom - hr.top + 4, left: r.left - hr.left });
+        return false;
+      }
+      setSlash(null);
+      if (/^(-{3}|—-)$/.test(b.text) && c.pos === b.text.length) {
+        const nb = S.block();
+        replace([c.el], [S.block('DIVIDER'), nb], { id: nb.id, pos: 0 });
+        return true;
+      }
+      for (const [re, type] of S.SHORTCUTS) {
+        const m = b.text.match(re);
+        if (!m || !/\s$|・$/.test(m[0]) || c.pos !== m[0].length) continue;
+        const kind = type === 'TODO_DONE' ? 'TODO' : type;
+        replace([c.el], [{ ...b, type: kind, checked: type === 'TODO_DONE', text: b.text.slice(m[0].length) }], { id: b.id, pos: 0 });
+        return true;
+      }
+      return false;
+    };
+    const onKeyDown = (e) => {
+      if (e.isComposing || e.keyCode === 229) return;
+      const c = caret();
+      if (!c) return;
+      if (e.key === 'Tab' && c.el.dataset.type === 'CODE') { e.preventDefault(); document.execCommand('insertText', false, '  '); }
+      if (e.key === 'Escape') setSlash(null);
+    };
+    // ToDo の丸・写真・区切り線を押した時
+    const onPointerDown = (e) => {
+      const blk = blockOf(e.target);
+      if (!blk) return;
+      if (blk.dataset.type === 'TODO') {
+        const r = blk.getBoundingClientRect();
+        if (e.clientX - r.left < 30) {
+          e.preventDefault();
+          blk.classList.toggle('checked');
+          save();
+        }
+      } else if (blk.dataset.type === 'IMAGE' || blk.dataset.type === 'DIVIDER') {
+        e.preventDefault();
+        lastCaret.current = { id: blk.dataset.id, pos: 0 };
+        setMenuFor(blk.dataset.id);
+      }
+    };
+    const onSelection = () => {
+      const c = caret();
+      if (c) lastCaret.current = { id: c.el.dataset.id, pos: c.pos };
+    };
+    // キーボードの高さが変わった時(候補の列が出る・消えるなど): 書いている行とキーボードの距離を変えない
+    const vv = window.visualViewport;
+    let lastH = vv?.height ?? 0;
+    const onResize = () => {
+      const h = vv.height;
+      const d = lastH - h;
+      lastH = h;
+      if (!caret() || Math.abs(d) > 200) { if (caret()) keepCaretVisible(); return; } // キーボードが出る・閉じる時は隠れないようにだけ
+      const sc = el.closest('.scroll');
+      if (sc && d) sc.scrollTop += d;
+    };
+    el.addEventListener('beforeinput', onBeforeInput);
+    el.addEventListener('input', onInput);
+    el.addEventListener('compositionend', onCompositionEnd);
+    el.addEventListener('keydown', onKeyDown);
+    el.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('selectionchange', onSelection);
+    vv?.addEventListener('resize', onResize);
+    return () => {
+      el.removeEventListener('beforeinput', onBeforeInput);
+      el.removeEventListener('input', onInput);
+      el.removeEventListener('compositionend', onCompositionEnd);
+      el.removeEventListener('keydown', onKeyDown);
+      el.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('selectionchange', onSelection);
+      vv?.removeEventListener('resize', onResize);
+    };
   }, []);
 
   // 区切り線を入れる。カーソルの位置で分けて、上の文章も下の文章も必ず残す
@@ -463,415 +464,7 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     replace([el], [{ ...b, text: before }, S.block('DIVIDER'), rest], { id: rest.id, pos: 0 });
   };
 
-  // ---- 「/」メニュー: 打った言葉で絞り込む(「/見出し」「/todo」など) ----
-  const slashItems = (q) => {
-    const query = (q || '').trim().toLowerCase();
-    return S.BLOCK_TYPES.filter((type) => !query
-      || TYPE_LABEL()[type].toLowerCase().includes(query)
-      || type.toLowerCase().includes(query)
-      || TYPE_ICON[type].toLowerCase() === query);
-  };
-  const pickSlash = (type) => {
-    const s = slashRef.current;
-    setSlash(null);
-    const el = s && byId(s.id);
-    if (!el || !type) return;
-    record(true);
-    const b = readBlock(el);
-    const text = /^[/／]/.test(b.text) ? '' : b.text;
-    root().focus({ preventScroll: true });
-    if (type === 'DIVIDER') { const nb = S.block(); replace([el], [S.block('DIVIDER'), nb], { id: nb.id, pos: 0 }); return; }
-    replace([el], [{ ...b, type, text, checked: false }], { id: b.id, pos: text.length });
-  };
-
-  /** 何行にもまたがった選択を消して、最初の行と最後の行の残りをつなぐ */
-  const deleteRange = (c) => {
-    const r = window.getSelection().getRangeAt(0);
-    const startEl = c.el;
-    const endEl = c.endEl;
-    const endPos = r.endContainer === root() ? 0 : offsetIn(endEl, r.endContainer, r.endOffset);
-    const els = [];
-    for (let n = startEl; n; n = n.nextElementSibling) { els.push(n); if (n === endEl) break; }
-    const head = textBlock(startEl) ? readBlock(startEl).text.slice(0, c.pos) : '';
-    const tail = textBlock(endEl) ? readBlock(endEl).text.slice(endPos) : '';
-    const base = textBlock(startEl) ? readBlock(startEl) : S.block();
-    const merged = { ...base, text: head + tail };
-    replace(els, [merged], { id: merged.id, pos: head.length });
-  };
-
-  // ---- 入力の前: Return・行頭や行末の削除・貼り付け・元に戻す を、その場で組み替える ----
-  useEffect(() => {
-    const el = root();
-    /**
-     * 行を組み替える操作(Return・行頭の Backspace・行末の Delete・何行もまたいだ削除)。
-     * iPad では、キーの動きを止めて(preventDefault)自分でカーソルを動かすと、キーボードが
-     * カーソルの位置を見失い、次の文字(とくに変換中の文字)を前の場所=上の行の末尾に入れてしまう。
-     * そこで ProseMirror と同じく、キーの動きはそのまま iPad にさせ、その直後(同じ瞬間、画面に描く前)に
-     * 行の形を正しく作り直す。キーボードは自分の操作でカーソルが動いたと分かるので、位置を見失わない。
-     */
-    const plan = (affected, blocks, focus) => {
-      applyPending();
-      record(true);
-      // iPad(ブラウザ)は、キーで前後の行まで変えることがある(区切り線ごと消して上の行とつなぐ など)。
-      // 前後 2 行ずつも、キーの前の形を覚えておき、変わっていたら元に戻す
-      const RADIUS = 2;
-      const prev = [];
-      let n = affected[0].previousElementSibling;
-      while (n && prev.length < RADIUS) { if (!affected.includes(n)) prev.unshift(n); n = n.previousElementSibling; }
-      const anchor = n; // ここより上は変わらない
-      const next = [];
-      n = affected[affected.length - 1].nextElementSibling;
-      while (n && next.length < RADIUS) { if (!affected.includes(n)) next.push(n); n = n.nextElementSibling; }
-      const all = [...prev, ...affected, ...next];
-      pending.current = {
-        ids: new Set(all.map((x) => x.dataset.id)),
-        anchor,
-        anchorIndex: anchor ? [...root().children].indexOf(anchor) + 1 : 0,
-        prev: prev.map((node) => ({ node, snap: readBlock(node) })),
-        next: next.map((node) => ({ node, snap: readBlock(node) })),
-        blocks,
-        focus,
-      };
-      clearTimeout(pendingTimer.current);
-      // キーが何も変えなかった時(行頭で消すものがない時など)のための保険
-      pendingTimer.current = setTimeout(applyPending, 120);
-    };
-
-    const onBeforeInput = (e) => {
-      const type = e.inputType;
-      if (type === 'historyUndo') { e.preventDefault(); applyPending(); undo(); return; }
-      if (type === 'historyRedo') { e.preventDefault(); applyPending(); redo(); return; }
-      if (composing.current || e.isComposing || type === 'insertCompositionText' || type === 'insertFromComposition' || type === 'deleteCompositionText') return;
-      applyPending();
-      // カーソルが行の外(書ける面そのもの)にある時に打った文字は、近くの行の中へ入れる
-      const s0 = window.getSelection();
-      if (s0.rangeCount && s0.isCollapsed && s0.anchorNode === el && (type === 'insertText' || type === 'insertReplacementText')) {
-        const c0 = caret();
-        if (c0 && textBlock(c0.el)) {
-          e.preventDefault();
-          placeCaret(c0.el, c0.pos);
-          const data = e.data ?? e.dataTransfer?.getData('text/plain') ?? '';
-          if (data) document.execCommand('insertText', false, data);
-          return;
-        }
-      }
-      const c = caret();
-      if (!c) return;
-      const isEnter = type === 'insertParagraph'
-        || (type === 'insertLineBreak' && !shiftDown.current && c.el.dataset.type !== 'CODE');
-
-      // 貼り付け: 文字だけを、Notion と同じく 1 行 1 ブロックで
-      if (type === 'insertFromPaste' || type === 'insertFromDrop' || type === 'insertFromPasteAsQuotation') {
-        e.preventDefault();
-        const text = (e.dataTransfer?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
-        if (!text) return;
-        record(true);
-        if (!c.collapsed && c.endEl !== c.el) deleteRange(c);
-        else if (!c.collapsed) document.execCommand('delete');
-        const cc = caret();
-        if (!cc) return;
-        if (!text.includes('\n')) { document.execCommand('insertText', false, text); return; }
-        const cur = readBlock(cc.el);
-        if (cur.type === 'CODE') {
-          replace([cc.el], [{ ...cur, text: cur.text.slice(0, cc.pos) + text + cur.text.slice(cc.pos) }], { id: cur.id, pos: cc.pos + text.length });
-          return;
-        }
-        const before = cur.text.slice(0, cc.pos);
-        const after = cur.text.slice(cc.pos);
-        const lines = text.split('\n');
-        const rest = lines.slice(1).map((line) => (line.trim() ? S.parseBlocks(line)[0] : S.block()));
-        const last = rest[rest.length - 1];
-        const lastLen = last.text.length;
-        rest[rest.length - 1] = { ...last, text: last.text + after };
-        replace([cc.el], [{ ...cur, text: before + lines[0] }, ...rest], { id: last.id, pos: lastLen });
-        return;
-      }
-
-      // 何行にもまたがって選んでいる時: 消す・打つ・Return
-      if (!c.collapsed && c.endEl !== c.el && (type.startsWith('delete') || type === 'insertText' || type === 'insertReplacementText' || isEnter)) {
-        const r = window.getSelection().getRangeAt(0);
-        const endPos = r.endContainer === root() ? 0 : offsetIn(c.endEl, r.endContainer, r.endOffset);
-        const els = [];
-        for (let n = c.el; n; n = n.nextElementSibling) { els.push(n); if (n === c.endEl) break; }
-        const head = textBlock(c.el) ? readBlock(c.el).text.slice(0, c.pos) : '';
-        const tail = textBlock(c.endEl) ? readBlock(c.endEl).text.slice(endPos) : '';
-        const base = textBlock(c.el) ? readBlock(c.el) : S.block();
-        if (isEnter) {
-          const nb = S.block(LIST_TYPES.includes(base.type) ? base.type : 'PARAGRAPH', tail);
-          plan(els, [{ ...base, text: head }, nb], { id: nb.id, pos: 0 });
-          return;
-        }
-        const data = type.startsWith('delete') ? '' : (e.data ?? e.dataTransfer?.getData('text/plain') ?? '');
-        plan(els, [{ ...base, text: head + data + tail }], { id: base.id, pos: head.length + data.length });
-        return;
-      }
-
-      if (isEnter) {
-        const cur = readBlock(c.el);
-        // 1 行の中を選んでいる時は、その部分を消してから
-        const selEnd = c.collapsed ? c.pos : offsetIn(c.el, window.getSelection().getRangeAt(0).endContainer, window.getSelection().getRangeAt(0).endOffset);
-        const before = cur.text.slice(0, c.pos);
-        const after = cur.text.slice(selEnd);
-        // 「/」メニューを開いている時の Return は、いちばん上の候補を選ぶ
-        if (slashRef.current && slashRef.current.id === cur.id) {
-          const s = slashRef.current;
-          const pick = slashItems(s.q)[s.index ?? 0];
-          setSlash(null);
-          if (pick === 'DIVIDER') { const nb = S.block(); plan([c.el], [S.block('DIVIDER'), nb], { id: nb.id, pos: 0 }); return; }
-          if (pick) { plan([c.el], [{ ...cur, type: pick, text: '', checked: false }], { id: cur.id, pos: 0 }); return; }
-        }
-        if (!textBlock(c.el)) {
-          const nb = S.block();
-          plan([c.el], [cur, nb], { id: nb.id, pos: 0 });
-          return;
-        }
-        if (cur.type === 'CODE') {
-          // コードの中の Return は改行。最後の空の行でもう一度 Return → コードを抜けて次の行へ
-          if (c.collapsed && c.pos === cur.text.length && cur.text.endsWith('\n')) {
-            const nb = S.block();
-            plan([c.el], [{ ...cur, text: cur.text.slice(0, -1) }, nb], { id: nb.id, pos: 0 });
-            return;
-          }
-          plan([c.el], [{ ...cur, text: `${before}\n${after}` }], { id: cur.id, pos: before.length + 1 });
-          return;
-        }
-        // 空のリストの項目・引用・コールアウトで Return → ふつうの行に戻す
-        if (!cur.text && cur.type !== 'PARAGRAPH') {
-          plan([c.el], [{ ...cur, type: 'PARAGRAPH', checked: false }], { id: cur.id, pos: 0 });
-          return;
-        }
-        const nextType = LIST_TYPES.includes(cur.type) ? cur.type : 'PARAGRAPH';
-        if (!before && after) {
-          // 行頭で Return: 上に空の行を足し、今の行はそのまま
-          plan([c.el], [S.block(nextType), { ...cur, text: after }], { id: cur.id, pos: 0 });
-          return;
-        }
-        const nb = S.block(nextType, after);
-        plan([c.el], [{ ...cur, text: before }, nb], { id: nb.id, pos: 0 });
-        return;
-      }
-
-      if (type.startsWith('delete') && type.endsWith('Backward') && c.collapsed && c.pos === 0) {
-        const b = readBlock(c.el);
-        // 行頭の Backspace: まず形式を外す
-        if (b.type !== 'PARAGRAPH' && textBlock(c.el)) {
-          plan([c.el], [{ ...b, type: 'PARAGRAPH', checked: false }], { id: b.id, pos: 0 });
-          return;
-        }
-        const prev = c.el.previousElementSibling;
-        if (!prev) { e.preventDefault(); if (!b.text) exitTop.current?.(); return; }
-        const p = readBlock(prev);
-        if (p.type === 'DIVIDER') { plan([prev, c.el], [b], { id: b.id, pos: 0 }); return; }
-        if (p.type === 'IMAGE') {
-          // 写真の下の空の行は消して、写真の上の行の最後へ。文字がある時と、写真の後ろに行が残らない時は何もしない
-          e.preventDefault();
-          if (b.text || !c.el.nextElementSibling) return;
-          let up = prev.previousElementSibling;
-          while (up && !textBlock(up)) up = up.previousElementSibling;
-          record(true);
-          c.el.remove();
-          if (up) placeCaret(up, textOf(up).length);
-          save();
-          return;
-        }
-        // 前の行とつなぐ
-        plan([prev, c.el], [{ ...p, text: p.text + b.text }], { id: p.id, pos: p.text.length });
-        return;
-      }
-      if (type.startsWith('delete') && type.endsWith('Forward') && c.collapsed && textBlock(c.el) && c.pos === textOf(c.el).length) {
-        // 行末の Delete: 次の行をつなぐ
-        const b = readBlock(c.el);
-        const next = c.el.nextElementSibling;
-        if (!next) { e.preventDefault(); return; }
-        const n = readBlock(next);
-        if (n.type === 'IMAGE') { e.preventDefault(); return; }
-        plan([c.el, next], [n.type === 'DIVIDER' ? b : { ...b, text: b.text + n.text }], { id: b.id, pos: b.text.length });
-        return;
-      }
-      if (type.startsWith('insert') || type.startsWith('delete')) record(false);
-    };
-    const onInput = (e) => {
-      // 行を組み替える操作のあと: iPad がキーを処理した直後に、正しい形に作り直す
-      if (pending.current) { applyPending(); return; }
-      if (composing.current || e.isComposing) { save(); return; }
-      normalize();
-      if (!shortcut()) save();
-      markEmpty();
-    };
-    // 変換が決まった後で(Safari が続けて送る入力も終わってから)、はじめて行の形を整える
-    const onCompositionEnd = () => setTimeout(() => {
-      composing.current = false;
-      normalize();
-      if (!shortcut()) save();
-      markEmpty();
-    }, 0);
-    // 変換が始まる前に、カーソルを必ず行の中に置く(行の外で変換が始まると、文字が別の行に入ってしまう)
-    const onCompositionStart = () => { applyPending(); composing.current = true; };
-    const onKeyUpDown = (e) => { shiftDown.current = e.shiftKey; };
-    // 行頭の記号で形式を変える・「---」で区切り線・行頭の「/」でメニュー
-    const shortcut = () => {
-      const c = caret();
-      if (!c || !c.collapsed) { setSlash(null); return false; }
-      const b = readBlock(c.el);
-      if (b.type === 'CODE' || !textBlock(c.el)) { setSlash(null); return false; }
-      const sm = b.text.match(/^[/／]([^\s/／]{0,20})$/);
-      if (sm && c.pos === b.text.length && slashItems(sm[1]).length) {
-        const r = c.el.getBoundingClientRect();
-        const hr = host.current.getBoundingClientRect();
-        const prev = slashRef.current;
-        setSlash({ id: b.id, top: r.bottom - hr.top + 4, left: Math.max(0, r.left - hr.left), q: sm[1], index: prev?.id === b.id && prev.q === sm[1] ? prev.index : 0 });
-        return false;
-      }
-      setSlash(null);
-      if (/^(-{3}|—-|ー{3})$/.test(b.text) && c.pos === b.text.length) {
-        record(true);
-        const nb = S.block();
-        replace([c.el], [S.block('DIVIDER'), nb], { id: nb.id, pos: 0 });
-        return true;
-      }
-      for (const [re, kind] of S.SHORTCUTS) {
-        const m = b.text.match(re);
-        if (!m || !/\s$|・$/.test(m[0]) || c.pos !== m[0].length) continue;
-        const to = kind === 'TODO_DONE' ? 'TODO' : kind;
-        if (to === b.type && to !== 'TODO') continue;
-        record(true);
-        replace([c.el], [{ ...b, type: to, checked: kind === 'TODO_DONE', text: b.text.slice(m[0].length) }], { id: b.id, pos: 0 });
-        return true;
-      }
-      return false;
-    };
-    const onKeyDown = (e) => {
-      if (composing.current || e.isComposing || e.keyCode === 229) return;
-      const s = slashRef.current;
-      if (s && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-        e.preventDefault();
-        const n = slashItems(s.q).length;
-        setSlash({ ...s, index: ((s.index ?? 0) + (e.key === 'ArrowDown' ? 1 : -1) + n) % n });
-        return;
-      }
-      if (s && e.key === 'Escape') { e.preventDefault(); setSlash(null); return; }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
-      const c = caret();
-      if (!c) return;
-      if (e.key === 'Tab') {
-        // 入力の面から出ていかないように。コードの中では字下げ
-        e.preventDefault();
-        if (c.el.dataset.type === 'CODE' && !e.shiftKey) document.execCommand('insertText', false, '  ');
-        return;
-      }
-      // いちばん上の行の頭で ↑ → タイトルへ
-      if (e.key === 'ArrowUp' && c.collapsed && c.pos === 0 && !c.el.previousElementSibling) { e.preventDefault(); exitTop.current?.(); }
-    };
-    // ToDo の丸: 押してもキーボードを出さずに付け外しする
-    const inCheck = (blk, x) => blk?.dataset.type === 'TODO' && x - blk.getBoundingClientRect().left < 32;
-    const onPointerDown = (e) => {
-      const blk = blockOf(e.target);
-      if (!inCheck(blk, e.clientX)) return;
-      e.preventDefault();
-      record(true);
-      blk.classList.toggle('checked');
-      save();
-    };
-    const onTouchStart = (e) => {
-      const tt = e.touches[0];
-      if (tt && inCheck(blockOf(e.target), tt.clientX)) e.preventDefault();
-    };
-    // 写真・区切り線を押した時のメニュー
-    const onClick = (e) => {
-      const blk = blockOf(e.target);
-      if (!blk || textBlock(blk)) return;
-      e.preventDefault();
-      lastCaret.current = { id: blk.dataset.id, pos: 0 };
-      el.blur();
-      setMenuFor(blk.dataset.id);
-    };
-    const onSelection = () => {
-      // iPad は、行と行の間(書ける面そのもの)にカーソルを置くことがある。
-      // そのまま打つと文字が行の外に入るので、すぐに近くの行の中へ移す
-      const s = window.getSelection();
-      if (composing.current) {
-        const cc = caret();
-        if (cc) lastCaret.current = { id: cc.el.dataset.id, pos: cc.pos };
-        return;
-      }
-      if (s.rangeCount && s.isCollapsed && s.anchorNode === el) {
-        const cm = caret();
-        if (cm) lastCaret.current = { id: cm.el.dataset.id, pos: cm.pos };
-        const kids = el.children;
-        if (kids.length) {
-          const i = s.anchorOffset;
-          let target = kids[Math.min(i, kids.length - 1)];
-          let end = i >= kids.length;
-          if (!textBlock(target)) {
-            // 写真・区切り線のそばなら、いちばん近い文字の行へ
-            let up = target.previousElementSibling;
-            while (up && !textBlock(up)) up = up.previousElementSibling;
-            let down = target.nextElementSibling;
-            while (down && !textBlock(down)) down = down.nextElementSibling;
-            target = end ? (up ?? down) : (down ?? up);
-            end = target === up;
-          }
-          if (target) { placeCaret(target, end ? textOf(target).length : 0); return; }
-        }
-      }
-      const c = caret();
-      if (c) lastCaret.current = { id: c.el.dataset.id, pos: c.pos };
-      if (slashRef.current && (!c || c.el.dataset.id !== slashRef.current.id)) setSlash(null);
-      markEmpty();
-    };
-    const onBlur = () => { root()?.querySelectorAll(':scope > .ph').forEach((x) => x.classList.remove('ph')); };
-    // キーボードの高さが変わった時(候補の列が出る・消えるなど): 書いている行とキーボードの距離を変えない
-    const vv = window.visualViewport;
-    let lastH = vv?.height ?? 0;
-    const onResize = () => {
-      const h = vv.height;
-      const d = lastH - h;
-      lastH = h;
-      if (!caret()) return;
-      if (Math.abs(d) > 150) { keepCaretVisible(); return; } // キーボードが出る・閉じる時は、隠れないようにだけ
-      const sc = el.closest('.scroll');
-      if (sc && d) sc.scrollTop += d;
-    };
-    el.addEventListener('beforeinput', onBeforeInput);
-    el.addEventListener('input', onInput);
-    el.addEventListener('compositionend', onCompositionEnd);
-    el.addEventListener('compositionstart', onCompositionStart);
-    el.addEventListener('keyup', onKeyUpDown);
-    el.addEventListener('keydown', onKeyUpDown);
-    el.addEventListener('keydown', onKeyDown);
-    el.addEventListener('pointerdown', onPointerDown);
-    el.addEventListener('touchstart', onTouchStart, { passive: false });
-    el.addEventListener('click', onClick);
-    el.addEventListener('blur', onBlur);
-    document.addEventListener('selectionchange', onSelection);
-    vv?.addEventListener('resize', onResize);
-    return () => {
-      el.removeEventListener('beforeinput', onBeforeInput);
-      el.removeEventListener('input', onInput);
-      el.removeEventListener('compositionend', onCompositionEnd);
-      el.removeEventListener('compositionstart', onCompositionStart);
-      el.removeEventListener('keyup', onKeyUpDown);
-      el.removeEventListener('keydown', onKeyUpDown);
-      el.removeEventListener('keydown', onKeyDown);
-      el.removeEventListener('pointerdown', onPointerDown);
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('click', onClick);
-      el.removeEventListener('blur', onBlur);
-      document.removeEventListener('selectionchange', onSelection);
-      vv?.removeEventListener('resize', onResize);
-    };
-  }, []);
-
   const focusRoot = () => { root()?.focus({ preventScroll: true }); };
-  /** 選んでいる行(複数行を選んでいればその全部) */
-  const selectedEls = () => {
-    const c = caret();
-    if (!c) { const el = currentEl(); return el ? [el] : []; }
-    const out = [];
-    for (let n = c.el; n; n = n.nextElementSibling) { out.push(n); if (n === c.endEl) break; }
-    return out;
-  };
 
   // 外から(道具・フォーマット・写真・ワード)操作する
   focusRef.current = {
@@ -880,34 +473,21 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       const lc = lastCaret.current;
       const el = lc && byId(lc.id);
       focusRoot();
-      if (el && textBlock(el)) placeCaret(el, Math.min(lc.pos, textOf(el).length));
+      if (el && TEXT_TYPES.includes(el.dataset.type)) placeCaret(el, Math.min(lc.pos, textOf(el).length));
       keepCaretVisible();
     },
     blur: () => { root()?.blur(); window.getSelection()?.removeAllRanges(); },
-    undo, redo,
     setType: (type) => {
-      const sels = selectedEls();
-      const el = sels[0] ?? root()?.lastElementChild;
+      const el = currentEl() ?? root()?.lastElementChild;
       if (!el) return;
-      record(true);
       const c = caret();
       const pos = c && c.el === el ? c.pos : (lastCaret.current?.id === el.dataset.id ? lastCaret.current.pos : textOf(el).length);
-      focusRoot();
-      if (type === 'DIVIDER') { insertDivider(el, pos); return; }
-      // 何行か選んでいる時は、選んだ行すべての形式を変える(Notion と同じ)
-      if (sels.length > 1) {
-        const texts = sels.filter(textBlock);
-        if (!texts.length) return;
-        const all = texts.every((x) => x.dataset.type === type);
-        const to = all ? 'PARAGRAPH' : type;
-        texts.forEach((x) => { const b = readBlock(x); const n = makeBlock({ ...b, type: to, checked: to === 'TODO' ? b.checked : false }); x.replaceWith(n); });
-        save();
-        return;
-      }
+      if (type === 'DIVIDER') { focusRoot(); insertDivider(el, pos); return; }
       const b = readBlock(el);
       if (b.type === 'IMAGE') return;
-      if (b.type === 'DIVIDER') { replace([el], [{ ...b, type, text: '', checked: false }], { id: b.id, pos: 0 }); return; }
-      // 何行もある行で、リストや見出しにする時は、カーソルのある行だけを変える
+      if (b.type === 'DIVIDER') { focusRoot(); replace([el], [{ ...b, type, text: '', checked: false }], { id: b.id, pos: 0 }); return; }
+      focusRoot();
+      // 何行もある行で、リストや見出しにする時は、カーソルのある行だけを変える(Apple のメモと同じ)
       if (b.text.includes('\n') && type !== b.type && !['PARAGRAPH', 'QUOTE', 'CALLOUT', 'CODE'].includes(type)) {
         const ls = b.text.lastIndexOf('\n', pos - 1) + 1;
         const le = b.text.indexOf('\n', pos) === -1 ? b.text.length : b.text.indexOf('\n', pos);
@@ -927,37 +507,33 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       if (!el) return;
       const other = step < 0 ? el.previousElementSibling : el.nextElementSibling;
       if (!other) return;
-      record(true);
       const pos = lastCaret.current?.pos ?? 0;
       if (step < 0) other.before(el); else other.after(el);
-      if (textBlock(el)) { focusRoot(); placeCaret(el, Math.min(pos, textOf(el).length)); }
+      if (TEXT_TYPES.includes(el.dataset.type)) { focusRoot(); placeCaret(el, Math.min(pos, textOf(el).length)); }
       save();
       keepCaretVisible();
     },
     removeCurrent: () => {
       const el = currentEl();
       if (!el) return;
-      record(true);
       const next = el.nextElementSibling ?? el.previousElementSibling;
       el.remove();
       if (!root().children.length) root().appendChild(makeBlock(S.block()));
       const target = next && root().contains(next) ? next : root().firstElementChild;
-      if (textBlock(target)) { focusRoot(); placeCaret(target, 0); }
+      if (TEXT_TYPES.includes(target.dataset.type)) { focusRoot(); placeCaret(target, 0); }
       save();
     },
     duplicate: () => {
       const el = currentEl();
       if (!el) return;
-      record(true);
       const b = readBlock(el);
       const copy = { ...b, id: S.block().id };
       const holder = document.createElement('div');
       el.after(holder);
       focusRoot();
-      replace([holder], [copy], textBlock(el) ? { id: copy.id, pos: copy.text.length } : null);
+      replace([holder], [copy], TEXT_TYPES.includes(copy.type) ? { id: copy.id, pos: copy.text.length } : null);
     },
     insertImages: (names) => {
-      record(true);
       const el = currentEl();
       const holder = document.createElement('div');
       if (el) el.after(holder); else root().appendChild(holder);
@@ -967,39 +543,39 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       replace([holder], [...imgs, ...tail], null);
     },
     insertText: (word) => {
-      record(true);
       focusRoot();
       if (!caret()) {
-        const lc = lastCaret.current;
-        let el = lc && byId(lc.id);
-        if (!textBlock(el)) el = root().lastElementChild;
-        if (!textBlock(el)) { el = makeBlock(S.block()); root().appendChild(el); }
-        placeCaret(el, lc && el.dataset.id === lc.id ? Math.min(lc.pos, textOf(el).length) : textOf(el).length);
+        let el = root().lastElementChild;
+        if (!el || !TEXT_TYPES.includes(el.dataset.type)) { el = makeBlock(S.block()); root().appendChild(el); }
+        placeCaret(el, textOf(el).length);
       }
       document.execCommand('insertText', false, word);
       save();
     },
-    focusStart: () => {
-      let el = root().firstElementChild;
-      if (!textBlock(el)) { el = makeBlock(S.block()); root().prepend(el); save(); }
-      focusRoot();
-      placeCaret(el, 0);
-      keepCaretVisible();
-    },
     focusEnd: () => {
       let el = root().lastElementChild;
-      if (!textBlock(el)) { el = makeBlock(S.block()); root().appendChild(el); save(); }
+      if (!el || !TEXT_TYPES.includes(el.dataset.type)) { el = makeBlock(S.block()); root().appendChild(el); save(); }
       focusRoot();
       placeCaret(el, textOf(el).length);
       keepCaretVisible();
     },
   };
 
-  const items = slash ? slashItems(slash.q) : [];
+  const pickSlash = (type) => {
+    const s = slash;
+    setSlash(null);
+    const el = s && byId(s.id);
+    if (!el) return;
+    const b = readBlock(el);
+    const text = b.text === '/' || b.text === '／' ? '' : b.text;
+    focusRoot();
+    if (type === 'DIVIDER') { const nb = S.block(); replace([el], [S.block('DIVIDER'), nb], { id: nb.id, pos: 0 }); return; }
+    replace([el], [{ ...b, type, text, checked: false }], { id: b.id, pos: text.length });
+  };
+
   return html`<div class="editor-host" ref=${host}>
-    ${slash && items.length > 0 && html`<div class="slash-menu" role="menu" aria-label=${t('turnInto')} style=${`top:${slash.top}px;left:${slash.left}px`}>
-      ${items.map((type, i) => html`<button role="menuitem" class=${`slash-item ${i === (slash.index ?? 0) ? 'on' : ''}`}
-        onMouseDown=${(e) => e.preventDefault()} onClick=${() => pickSlash(type)}>
+    ${slash && html`<div class="slash-menu" role="menu" aria-label=${t('turnInto')} style=${`top:${slash.top}px;left:${slash.left}px`}>
+      ${S.BLOCK_TYPES.map((type) => html`<button role="menuitem" class="slash-item" onMouseDown=${(e) => e.preventDefault()} onClick=${() => pickSlash(type)}>
         <span class="slash-icon">${TYPE_ICON[type]}</span>${TYPE_LABEL()[type]}</button>`)}
     </div>`}
     ${menuFor && html`<${ActionSheet} onClose=${() => setMenuFor(null)} items=${[

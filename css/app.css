@@ -779,5 +779,5 @@ html, body { touch-action: pan-x pan-y; }
 
 /* ---- v23: 画面全体は動かさない(中の箱だけがスクロールする) ---- */
 html, body { overscroll-behavior: none; }
-body { position: fixed; inset: 0; width: 100%; }
+/* v27: 切り分けのため、いったん外している  body { position: fixed; inset: 0; width: 100%; } */
 .scroll, .feed, .sheet, .panel, .pop-menu, .slash-menu, .alert-scroll { overscroll-behavior: contain; }
