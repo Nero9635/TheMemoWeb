@@ -157,6 +157,7 @@ function makeBlock(b, links = false) {
   el.dataset.id = b.id;
   el.dataset.type = b.type;
   if (b.comment) el.dataset.comment = b.comment;
+  if (['center', 'right'].includes(b.align)) el.dataset.align = b.align; // 文字揃え(左はなし)
   if (b.type === 'IMAGE') {
     el.contentEditable = 'false';
     el.dataset.image = b.image;
@@ -204,6 +205,7 @@ function readBlock(el) {
     checked: el.classList.contains('checked'),
     image: el.dataset.image || '',
     comment: el.dataset.comment || '',
+    ...(el.dataset.align ? { align: el.dataset.align } : {}),
     ...(type !== 'DIVIDER' && type !== 'IMAGE' && richOf(el) ? { rich: richOf(el) } : {}),
   };
 }
@@ -287,7 +289,7 @@ function placeCaret(blockEl, pos) {
 
 // ---------- エディタ ----------
 
-export function BlockEditor({ memo, focusRef }) {
+export function BlockEditor({ memo, focusRef, onBlockMenu }) {
   const host = useRef();
   const rootRef = useRef(null);
   const lastCaret = useRef(null); // {id, pos}
@@ -444,7 +446,7 @@ export function BlockEditor({ memo, focusRef }) {
           return;
         }
         const { rich: _r, ...curPlain } = cur;
-        const nb = { ...S.block(nextType, after.text), ...(after.rich ? { rich: after.rich } : {}) };
+        const nb = { ...S.block(nextType, after.text), ...(after.rich ? { rich: after.rich } : {}), ...(cur.align ? { align: cur.align } : {}) };
         replace([cc.el], [{ ...curPlain, text: before.text, ...(before.rich ? { rich: before.rich } : {}) }, nb], { id: nb.id, pos: 0 });
         return;
       }
@@ -609,6 +611,24 @@ export function BlockEditor({ memo, focusRef }) {
   focusRef.current = {
     currentType: () => currentEl()?.dataset.type ?? null,
     /** 太字・斜体・下線・取り消し線(選んだ文字に。何も選んでいなければ、これから打つ文字に) */
+    /** 文字揃え(選んだ行すべて。何も選んでいなければカーソルの行)。行に印を付けるだけで、文字にはさわらない */
+    setAlign: (align) => {
+      const lr = lastRange.current;
+      let els = [];
+      const a = lr && byId(lr.a);
+      const z = lr && byId(lr.z);
+      if (a && z) { for (let n = a; n; n = n.nextElementSibling) { els.push(n); if (n === z) break; } }
+      if (!els.length) { const c = currentEl(); if (c) els = [c]; }
+      els.filter((x) => TEXT_TYPES.includes(x.dataset.type)).forEach((x) => {
+        if (align === 'left') delete x.dataset.align; else x.dataset.align = align;
+      });
+      save();
+    },
+    currentAlign: () => {
+      const lr = lastRange.current;
+      const el = (lr && byId(lr.a)) || currentEl();
+      return el?.dataset.align || 'left';
+    },
     format: (cmd) => {
       const lr = lastRange.current;
       const a = lr && byId(lr.a);
@@ -731,7 +751,49 @@ export function BlockEditor({ memo, focusRef }) {
     replace([el], [{ ...b, type, text, checked: false }], { id: b.id, pos: text.length });
   };
 
+  // 行の左の「+」(Notion のように)。書いている行の横にだけ出す。書ける面の外の別のボタンなので、入力には関わらない
+  const plusRef = useRef();
+  const plusFor = useRef(null);
+  useEffect(() => {
+    const place = () => {
+      const btn = plusRef.current;
+      const el = root();
+      if (!btn || !el) return;
+      const c = document.activeElement === el ? caret() : null;
+      const blk = c?.el;
+      if (!blk || !TEXT_TYPES.includes(blk.dataset.type)) { btn.style.display = 'none'; plusFor.current = null; return; }
+      const hr = host.current.getBoundingClientRect();
+      const br = blk.getBoundingClientRect();
+      const sc = el.closest('.scroll')?.getBoundingClientRect();
+      const lh = parseFloat(getComputedStyle(blk).lineHeight) || 28;
+      const pad = parseFloat(getComputedStyle(blk).paddingTop) || 0;
+      const size = 28;
+      // 行の文字の左に。画面の端より外には出さない
+      const left = br.left - hr.left - size - 4;
+      // 左の余白が足りない時(iPhone の幅など)は、文字に重ならないよう出さない
+      if (sc && br.left - sc.left < size + 6) { btn.style.display = 'none'; plusFor.current = null; return; }
+      btn.style.left = `${left}px`;
+      btn.style.top = `${br.top - hr.top + pad + (lh - size) / 2}px`;
+      btn.style.display = 'flex';
+      plusFor.current = blk.dataset.id;
+    };
+    const later = () => requestAnimationFrame(place);
+    document.addEventListener('selectionchange', later);
+    const el = root();
+    el?.addEventListener('input', later);
+    el?.addEventListener('blur', later);
+    window.visualViewport?.addEventListener('resize', later);
+    return () => {
+      document.removeEventListener('selectionchange', later);
+      el?.removeEventListener('input', later);
+      el?.removeEventListener('blur', later);
+      window.visualViewport?.removeEventListener('resize', later);
+    };
+  }, []);
+
   return html`<div class="editor-host" ref=${host}>
+    <button class="blk-plus" ref=${plusRef} style="display:none" aria-label=${t('format')} tabindex="-1"
+      onMouseDown=${(e) => e.preventDefault()} onClick=${() => onBlockMenu?.()}>${Icon.plus(18)}</button>
     ${slash && html`<div class="slash-menu" role="menu" aria-label=${t('turnInto')} style=${`top:${slash.top}px;left:${slash.left}px`}>
       ${S.BLOCK_TYPES.map((type) => html`<button role="menuitem" class="slash-item" onMouseDown=${(e) => e.preventDefault()} onClick=${() => pickSlash(type)}>
         <span class="slash-icon">${TYPE_ICON[type]}</span>${TYPE_LABEL()[type]}</button>`)}
@@ -782,7 +844,7 @@ export function BlockView({ memo, onToggle, images = false }) {
       if (!b.text && b.type === 'PARAGRAPH') return null;
       const rh = richHtml(b);
       const text = rh ? html`<span dangerouslySetInnerHTML=${{ __html: rh }}></span>` : html`<${Linkified} text=${b.text} />`;
-      switch (b.type) {
+      const node = (() => { switch (b.type) {
         case 'HEADING1': return html`<div class="bv-h1">${text}</div>`;
         case 'HEADING2': return html`<div class="bv-h2">${text}</div>`;
         case 'HEADING3': return html`<div class="bv-h3">${text}</div>`;
@@ -795,7 +857,8 @@ export function BlockView({ memo, onToggle, images = false }) {
             onClick=${(e) => { e.stopPropagation(); onToggle?.(b.id); }}>${b.checked && Icon.check(12)}</button><span>${text}</span></div>`;
         case 'QUOTE': return html`<div class="bv-quote">${text}</div>`;
         default: return html`<p class="bv-p">${text}</p>`;
-      }
+      } })();
+      return b.align ? html`<div style=${`text-align:${b.align}`}>${node}</div>` : node;
     })}
   </div>`;
 }

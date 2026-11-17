@@ -163,6 +163,10 @@ const D = {
   fmtItalic: ['Italic', '斜体', '斜体'],
   fmtUnderline: ['Underline', '下線', '下划线'],
   fmtStrike: ['Strikethrough', '取り消し線', '删除线'],
+  textAlign: ['Alignment', '文字揃え', '对齐'],
+  alignLeft: ['Align left', '左揃え', '左对齐'],
+  alignCenter: ['Center', '中央揃え', '居中'],
+  alignRight: ['Align right', '右揃え', '右对齐'],
   // ---- v15 ----
   fmtTitle: ['Title', 'タイトル', '标题'],
   fmtHeading: ['Heading', '見出し', '小标题'],

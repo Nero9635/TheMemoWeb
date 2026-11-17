@@ -1,6 +1,6 @@
 // オフラインでも開けるよう、アプリの部品を端末に置いておく。
 // ファイルを変えたら VERSION を上げる(古い部品が残らないように)
-const VERSION = 'thememo-v31';
+const VERSION = 'thememo-v32';
 const FILES = [
   './',
   './index.html',

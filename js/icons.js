@@ -5,6 +5,9 @@ const svg = (size, body, fill = false) => html`<svg width=${size} height=${size}
   fill=${fill ? 'currentColor' : 'none'} stroke=${fill ? 'none' : 'currentColor'} stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
 export const Icon = {
+  alignLeft: (s = 22) => svg(s, html`<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>`),
+  alignCenter: (s = 22) => svg(s, html`<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>`),
+  alignRight: (s = 22) => svg(s, html`<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>`),
   bulb: (s = 22) => svg(s, html`<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/>`),
   book: (s = 20) => svg(s, html`<path d="M12 6.5C10.5 5 8 4.5 4 4.5v13c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2v-13c-4 0-6.5.5-8 2z"/><path d="M12 6.5v13"/>`),
   listBullet: (s = 22) => svg(s, html`<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/>`),

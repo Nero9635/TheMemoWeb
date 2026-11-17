@@ -133,6 +133,7 @@ export function Detail({ id, reply = false }) {
     blurTimer.current = setTimeout(() => setFocusKind(kindOf(document.activeElement)), 120);
   };
   const curType = panel === 'format' ? editor.current.currentType?.() : null;
+  const curAlign = panel === 'format' ? (editor.current.currentAlign?.() ?? 'left') : 'left';
   const setType = (type) => { editor.current.setType(type); setTimeout(() => force((n) => n + 1), 30); };
 
   return html`<div class=${`screen ${typing ? 'typing' : ''}`}>
@@ -171,7 +172,7 @@ export function Detail({ id, reply = false }) {
       </div>`}
 
       ${editing
-        ? html`<${BlockEditor} key=${editorKey} memo=${memo} focusRef=${editor}
+        ? html`<${BlockEditor} key=${editorKey} memo=${memo} focusRef=${editor} onBlockMenu=${() => openPanel('format')}
             onExitTop=${() => { const el = titleRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }} />
           ${!typing && html`<button class="tap-to-write" aria-label=${t('write')} onClick=${() => editor.current.focusEnd()}></button>`}`
         : html`<div class="read-body" onDblClick=${() => setMode('edit')}>
@@ -286,6 +287,13 @@ export function Detail({ id, reply = false }) {
           ${[['bold', 'B', 'fmtBold'], ['italic', 'I', 'fmtItalic'], ['underline', 'U', 'fmtUnderline'], ['strikeThrough', 'S', 'fmtStrike']].map(([cmd, label, key]) => html`<button
             class=${`fmt-btn fmt-mark fmt-mark-${cmd.toLowerCase()}`} aria-label=${t(key)} title=${t(key)}
             onMouseDown=${(e) => e.preventDefault()} onClick=${() => editor.current.format?.(cmd)}>${label}</button>`)}
+        </div>
+      </div>
+      <div class="fmt-groups">
+        <div class="fmt-group" role="radiogroup" aria-label=${t('textAlign')}>
+          ${[['left', Icon.alignLeft(22), 'alignLeft'], ['center', Icon.alignCenter(22), 'alignCenter'], ['right', Icon.alignRight(22), 'alignRight']].map(([a, icon, key]) => html`<button
+            role="radio" aria-checked=${curAlign === a} class=${`fmt-btn ${curAlign === a ? 'on' : ''}`} aria-label=${t(key)} title=${t(key)}
+            onMouseDown=${(e) => e.preventDefault()} onClick=${() => { editor.current.setAlign?.(a); force((n) => n + 1); }}>${icon}</button>`)}
         </div>
       </div>
       <div class="fmt-groups">
