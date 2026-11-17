@@ -443,18 +443,32 @@ function centerCaret(el, force) {
   const tools = sc.querySelector('.tools-sticky')?.offsetHeight ?? 0;
   const bottom = Math.min(r.bottom, viewBottom) - r.top - tools; // 道具のすぐ上(スクロールの箱の中の位置)
   const lh = parseFloat(getComputedStyle(el).lineHeight) || 30;
-  const y = el.getBoundingClientRect().top + caretOffset(el) - r.top; // カーソルの行の真ん中
-  // 書いている行と道具の間は 2 行分だけ空ける。それより下に来たら、その分だけ上げる
+  const y = el.getBoundingClientRect().top + caretOffset(el) - el.scrollTop - r.top; // カーソルの行の真ん中
+  // 書いている行と道具の間は 2 行分だけ空ける
   const target = bottom - lh * 2.5;
-  if (y > target + 2) { sc.scrollTop += y - target; return; }
-  // 上に隠れた時だけ下ろす(打っている時に画面が勝手に上下しないように)
+  // 文章の最後の方を書いている時は、上にずれすぎていても下ろして、いつも同じ位置に保つ
+  // (iPad が自分で一番下までスクロールしてしまっても、ここで戻す)
+  const blocks = el.closest('.blocks');
+  const all = blocks ? blocks.querySelectorAll(':scope > .blk') : [];
+  const lastBlk = all.length ? all[all.length - 1] : null;
+  const docEnd = lastBlk ? lastBlk.getBoundingClientRect().bottom - r.top : y;
+  const nearEnd = docEnd - y < lh * 3;
+  if (y > target + 2 || (force && nearEnd && y < target - 2)) {
+    sc.scrollTop += y - target;
+    return;
+  }
+  // 上に隠れた時だけ下ろす
   if (y < lh * 1.5) sc.scrollTop += y - lh * 2;
 }
 
 let centerTimer = 0;
+let lateTimer = 0;
 function centerSoon(el, force) {
   cancelAnimationFrame(centerTimer);
+  clearTimeout(lateTimer);
   centerTimer = requestAnimationFrame(() => requestAnimationFrame(() => centerCaret(el, force)));
+  // iPad は入力の少しあとに自分でスクロールすることがあるので、もう一度合わせる
+  lateTimer = setTimeout(() => centerCaret(el, force), 180);
 }
 
 function retype(b, type) {
@@ -470,6 +484,7 @@ function BlockText({ block, placeholder, refFn, onFocus, onInput, onKeyDown, onC
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
+    el.scrollTop = 0; // 伸びる前に入力欄の中がずれていたら戻す
   }, [block.text, block.type]);
   return html`<textarea ref=${(el) => { ref.current = el; refFn(el); }} class="blk-input" rows="1" value=${block.text}
     placeholder=${placeholder} aria-label=${TYPE_LABEL()[block.type]} autocapitalize="sentences"
