@@ -172,7 +172,7 @@ export function Detail({ id, reply = false }) {
       </div>`}
 
       <div class="detail-actions">
-        <button class=${`act ${thread ? 'on' : ''}`} aria-label=${t('reply')} aria-expanded=${thread} onClick=${() => (thread ? setThread(false) : focusReply())}>
+        <button class=${`act ${thread ? 'on' : ''}`} aria-label=${t('reply')} aria-expanded=${thread} onClick=${() => setThread(!thread)}>
           ${Icon.reply(20)}${S.replyCount(memo) > 0 && html`<span>${S.replyCount(memo)}</span>`}</button>
         <button class=${`act ai-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('aiAndPersona', { name: p.name })} aria-haspopup="menu" onClick=${openPop('ai')}>
           ${busy ? html`<span class="spinner"></span>` : Icon.sparkle(20)}</button>

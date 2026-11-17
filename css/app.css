@@ -703,3 +703,7 @@ html, body { touch-action: pan-x pan-y; }
 .fmt-btn { flex: 1; height: 48px; flex-direction: row; gap: 0; border-radius: 0; background: var(--cell); }
 .fmt-btn.on { background: color-mix(in srgb, var(--accent) 14%, var(--cell)); color: var(--accent); }
 .fmt-row, .fmt-cap, .fmt-hint { display: none; }
+
+/* ---- v16 ---- */
+/* 書いている間だけ下に足す余白: 最後の行の下にも 8 行分あけられるだけ */
+.type-space { height: calc(var(--ed-lh) * 19px * var(--ts) * 9); }

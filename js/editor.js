@@ -440,11 +440,12 @@ function centerCaret(el, force) {
   const vh = window.visualViewport?.height ?? window.innerHeight;
   const visible = Math.max(120, Math.min(sc.clientHeight, vh - scTop) - 60); // 下の道具の分を引く
   const y = el.getBoundingClientRect().top + caretOffset(el) - scTop;
-  const target = visible * 0.45;
-  if (!force && y > visible * 0.12 && y < visible * 0.72) return;
-  const delta = y - target;
-  if (Math.abs(delta) < 6) return;
-  sc.scrollTop += delta;
+  // 書いている行の下に、いつも約 8 行分の余白を残す(キーボード・道具の上)
+  const lh = parseFloat(getComputedStyle(el).lineHeight) || 30;
+  const target = Math.max(visible * 0.25, visible - lh * 8);
+  if (y > target + 4) { sc.scrollTop += y - target; return; }
+  // 上に隠れた時だけ下ろす(打っている時に画面が勝手に上下しないように)
+  if (y < Math.min(lh * 1.5, visible * 0.12)) sc.scrollTop += y - lh * 2;
 }
 
 let centerTimer = 0;

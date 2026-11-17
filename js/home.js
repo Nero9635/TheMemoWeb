@@ -156,7 +156,7 @@ export function Home() {
 
   return html`<div class="screen home">
     <div class="safe-top"></div>
-    ${!typing && html`<header class="home-bar">
+    ${html`<header class="home-bar">
       <button class="title-btn" aria-label=${mode === 'month' ? t('showWeek') : t('showMonth')}
         onClick=${() => { if (mode === 'month') setCal('week'); else { setMonth(st.selected.slice(0, 7)); setCal('month'); } }}>
         <span>${title}</span><span class="accent chev-btn">${mode === 'month' ? Icon.chevronUp(14) : Icon.chevronDown(14)}</span></button>
@@ -169,14 +169,14 @@ export function Home() {
       </div>
     </header>`}
 
-    ${mode !== 'hidden' && html`<section class=${`cal-card ${typing ? 'compact' : ''}`} aria-label=${title}>
+    ${mode !== 'hidden' && html`<section class="cal-card" aria-label=${title}>
       <${WeekdayRow} />
-      ${(mode === 'week' || typing) && html`<${WeekStrip} week=${week} today=${today} selected=${st.selected} info=${info}
+      ${mode === 'week' && html`<${WeekStrip} week=${week} today=${today} selected=${st.selected} info=${info}
         onPick=${jumpTo} onPrev=${() => setWeekStart(addDays(weekStart, -7))} onNext=${() => setWeekStart(addDays(weekStart, 7))}
         onExpand=${() => { setMonth(st.selected.slice(0, 7)); setCal('month'); }} onHide=${() => setCal('hidden')} />`}
-      ${mode === 'month' && !typing && html`<${MonthGrid} month=${month} today=${today} selected=${st.selected} info=${info}
+      ${mode === 'month' && html`<${MonthGrid} month=${month} today=${today} selected=${st.selected} info=${info}
         onMonth=${setMonth} onPick=${(k) => S.setState({ selected: k })} />`}
-      ${!typing && html`<div class="cal-foot">
+      ${html`<div class="cal-foot">
         <div class="stats">
           <span class="stat"><strong>${stats.posts}</strong> ${t('statPosts')}</span>
           <span class="stat"><strong>${stats.days}</strong> ${t('statDays')}</span>
@@ -187,7 +187,7 @@ export function Home() {
           onOpen=${() => { setCal('week'); jumpTo(st.selected); }} />`}
       </div>`}
     </section>`}
-    ${!typing && html`<${Handle} mode=${mode} onChange=${setCal} />`}
+    ${html`<${Handle} mode=${mode} onChange=${setCal} />`}
 
     <div class="feed" ref=${scroller} onScroll=${onScroll}>
       <div>
