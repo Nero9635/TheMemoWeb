@@ -268,6 +268,19 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     h.lastAt = 0;
   };
 
+  const shiftDown = useRef(false);
+  /** カーソルが行の外(書ける面そのもの)にあれば、直前までいた行(なければ近くの行)の中へ戻す */
+  const pinCaret = () => {
+    const s = window.getSelection();
+    const el = root();
+    if (!el || !s.rangeCount || !s.isCollapsed || s.anchorNode !== el) return;
+    const lc = lastCaret.current;
+    const home = lc && byId(lc.id);
+    if (home && textBlock(home)) { placeCaret(home, Math.min(lc.pos, textOf(home).length)); return; }
+    const c = caret();
+    if (c && textBlock(c.el)) placeCaret(c.el, c.pos);
+  };
+
   /** 書ける面の中を、いつも「ブロックの並び」に保つ(ブラウザが直接文字や <br> を置いた時など) */
   const normalize = () => {
     const el = root();
@@ -291,7 +304,24 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       const next = n.nextSibling;
       changed = true;
       if (!text) { n.remove(); continue; }
-      if (prev && prev.nodeType === 1 && textBlock(prev)) {
+      // いちばん確かなのは「直前までカーソルがあった行」。その位置に入れる
+      const lc = lastCaret.current;
+      const home = lc && byId(lc.id);
+      const isEmpty = (x) => x && x.nodeType === 1 && textBlock(x) && !readBlock(x).text;
+      if (home && textBlock(home)) {
+        const ht = readBlock(home).text;
+        const at = Math.min(lc.pos, ht.length);
+        fillText(home, ht.slice(0, at) + text + ht.slice(at), false);
+        n.remove();
+        if (hasCaret) keep = { el: home, pos: at + caretInN };
+        lastCaret.current = { id: lc.id, pos: at + text.length };
+      } else if (isEmpty(next) || (!isEmpty(prev) && next && next.nodeType === 1 && textBlock(next) && !(prev && prev.nodeType === 1 && textBlock(prev)))) {
+        // 空の行が下にあれば、その行に(打とうとしていたのはその行)
+        const nt = readBlock(next).text;
+        fillText(next, text + nt, false);
+        n.remove();
+        if (hasCaret) keep = { el: next, pos: caretInN };
+      } else if (prev && prev.nodeType === 1 && textBlock(prev)) {
         const pt = readBlock(prev).text;
         fillText(prev, pt + text, false);
         n.remove();
@@ -376,7 +406,9 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
   useLayoutEffect(() => {
     const el = document.createElement('div');
     el.className = 'ce';
-    el.contentEditable = 'true';
+    // 文字だけを書く面にする(iPad のキーボードに B / I / U が出ない。貼り付けや結合で飾りも入らない)
+    try { el.contentEditable = 'plaintext-only'; } catch { /* 使えないブラウザ */ }
+    if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
     el.spellcheck = true;
     el.setAttribute('role', 'textbox');
     el.setAttribute('aria-multiline', 'true');
@@ -464,7 +496,14 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
           return;
         }
       }
-      if (e.isComposing) return;
+      if (e.isComposing || type === 'insertCompositionText') { pinCaret(); return; }
+      // Return: 文字だけの面では「改行」として来ることがあるので、Shift を押していなければ新しい行にする
+      if (type === 'insertLineBreak' && !shiftDown.current && caret()?.el.dataset.type !== 'CODE') {
+        e.preventDefault();
+        const ev2 = new InputEvent('beforeinput', { inputType: 'insertParagraph', bubbles: true, cancelable: true });
+        el.dispatchEvent(ev2);
+        return;
+      }
       const c = caret();
       if (!c) return;
       // 何行にもまたがって選んでいる時: 消す・打つ・Return・貼り付けの前に、選んだ所を自分で消してつなぐ
@@ -495,7 +534,13 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
         if (caret() && !caret().collapsed) document.execCommand('delete'); // 1 行の中を選んでいる時だけ
         const cc = caret();
         if (!cc) return;
-        if (!text.includes('\n') || cc.el.dataset.type === 'CODE') { document.execCommand('insertText', false, text); return; }
+        if (!text.includes('\n')) { document.execCommand('insertText', false, text); return; }
+        if (cc.el.dataset.type === 'CODE') {
+          // コードの中は、何行あっても同じブロックの中にそのまま入れる
+          const cb = readBlock(cc.el);
+          replace([cc.el], [{ ...cb, text: cb.text.slice(0, cc.pos) + text + cb.text.slice(cc.pos) }], { id: cb.id, pos: cc.pos + text.length });
+          return;
+        }
         // 何行もある時は、Notion と同じく 1 行を 1 ブロックに(「- 」などの記号も形式にする)
         const cur = readBlock(cc.el);
         const before = cur.text.slice(0, cc.pos);
@@ -601,6 +646,9 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       markEmpty();
     };
     const onCompositionEnd = () => setTimeout(() => { normalize(); if (!shortcut()) save(); markEmpty(); }, 0);
+    // 変換が始まる前に、カーソルを必ず行の中に置く(行の外で変換が始まると、文字が別の行に入ってしまう)
+    const onCompositionStart = () => pinCaret();
+    const onKeyUpDown = (e) => { shiftDown.current = e.shiftKey; };
     // 行頭の記号で形式を変える・「---」で区切り線・行頭の「/」でメニュー
     const shortcut = () => {
       const c = caret();
@@ -722,6 +770,9 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     el.addEventListener('beforeinput', onBeforeInput);
     el.addEventListener('input', onInput);
     el.addEventListener('compositionend', onCompositionEnd);
+    el.addEventListener('compositionstart', onCompositionStart);
+    el.addEventListener('keyup', onKeyUpDown);
+    el.addEventListener('keydown', onKeyUpDown);
     el.addEventListener('keydown', onKeyDown);
     el.addEventListener('pointerdown', onPointerDown);
     el.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -733,6 +784,9 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       el.removeEventListener('beforeinput', onBeforeInput);
       el.removeEventListener('input', onInput);
       el.removeEventListener('compositionend', onCompositionEnd);
+      el.removeEventListener('compositionstart', onCompositionStart);
+      el.removeEventListener('keyup', onKeyUpDown);
+      el.removeEventListener('keydown', onKeyUpDown);
       el.removeEventListener('keydown', onKeyDown);
       el.removeEventListener('pointerdown', onPointerDown);
       el.removeEventListener('touchstart', onTouchStart);
