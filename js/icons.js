@@ -5,6 +5,17 @@ const svg = (size, body, fill = false) => html`<svg width=${size} height=${size}
   fill=${fill ? 'currentColor' : 'none'} stroke=${fill ? 'none' : 'currentColor'} stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
 export const Icon = {
+  bulb: (s = 22) => svg(s, html`<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2h5c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/>`),
+  book: (s = 20) => svg(s, html`<path d="M12 6.5C10.5 5 8 4.5 4 4.5v13c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2v-13c-4 0-6.5.5-8 2z"/><path d="M12 6.5v13"/>`),
+  listBullet: (s = 22) => svg(s, html`<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.3" fill="currentColor" stroke="none"/>`),
+  listNumber: (s = 22) => svg(s, html`<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 4.5l1.5-.8V8M3.6 10.8c.4-.6 2.4-.8 2.4.5 0 1-2.4 1.8-2.4 2.7h2.5M3.7 16.2h2.1l-1.2 1.4c1 0 1.6.4 1.6 1.1 0 1-1.6 1.3-2.5.7" stroke-width="1.3"/>`),
+  checklist: (s = 22) => svg(s, html`<circle cx="5.5" cy="7" r="2.3"/><path d="M4.4 7l.8.8 1.5-1.6" stroke-width="1.4"/><circle cx="5.5" cy="16.5" r="2.3"/><path d="M11 7h9M11 16.5h9"/>`),
+  divider: (s = 22) => svg(s, html`<path d="M3 12h18" stroke-width="2.2"/><path d="M7 6h10M7 18h10" opacity="0.4"/>`),
+  quote: (s = 22) => svg(s, html`<path d="M5 5v14" stroke-width="2.6"/><path d="M10 8h10M10 12h10M10 16h7"/>`),
+  arrowUp: (s = 20) => svg(s, html`<path d="M12 19V5M6 11l6-6 6 6"/>`),
+  arrowDown: (s = 20) => svg(s, html`<path d="M12 5v14M6 13l6 6 6-6"/>`),
+  keyboardDown: (s = 22) => svg(s, html`<rect x="2.5" y="4" width="19" height="11" rx="2"/><path d="M6 8h.01M9.3 8h.01M12.6 8h.01M15.9 8h.01M8 11.5h8" stroke-width="2"/><path d="M9 18.5l3 2.5 3-2.5"/>`),
+  photoCamera: (s = 22) => svg(s, html`<rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="12" cy="12" r="3.4"/><path d="M8 5l1.2-2h5.6L16 5"/>`),
   star: (s = 22) => svg(s, html`<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>`),
   starFill: (s = 22) => svg(s, html`<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>`, true),
   back: (s = 24) => svg(s, html`<path d="M15 5l-7 7 7 7" stroke-width="2.4"/>`),

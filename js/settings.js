@@ -175,7 +175,8 @@ function FullBackup({ onClose }) {
 }
 
 const PRESETS = [
-  { label: 'Dr. Jung', p: S.DEFAULT_PERSONA },
+  { label: 'My AI', p: S.DEFAULT_PERSONA },
+  { label: 'Dr. Jung', p: S.JUNG_PERSONA },
   { label: 'Coach', p: { name: 'Coach', icon: '🏃', role: '散歩や日々の習慣を応援する、前向きなライフコーチ。書かれた内容から小さな前進を見つけてほめ、次の一歩を1つだけ具体的に提案する。', style: '明るく短い言葉で、親しみをこめて話す。相手を「あなた」と呼ぶ。' } },
   { label: 'Zen monk', p: { name: 'Zen monk', icon: '🍃', role: '禅の考え方を大切にする僧侶。いま・ここに気づくこと、手放すこと、身の回りの小さな美しさに目を向けることをやさしく思い出させる。', style: '静かで余白のある、ゆっくりとした語り口。短い言葉を選ぶ。' } },
   { label: 'Editor', p: { name: 'Editor', icon: '✎', role: '文章とアイデアを磨く、経験豊かな編集者。メモの中の面白い種を見つけ、文章や作品にするための切り口と、足りない情報を指摘する。', style: '率直で具体的。ていねい語で、要点から話す。' } },
@@ -203,7 +204,7 @@ export function Character() {
       <input ref=${photo} type="file" accept="image/*" hidden onChange=${async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) { const n = await S.importImage(f); if (n) S.updatePersona({ image: n }); } }} />
       <div class="chips-scroll">${PRESETS.map((x) => html`<button class=${`chip ${p.name === x.p.name ? 'on' : ''}`} onClick=${() => pick(x.p)}>${x.p.icon} ${x.label}</button>`)}</div>
       <div class="group">
-        <label class="row"><span class="row-label fixed">${t('name')}</span><input class="row-input" value=${p.name} onInput=${(e) => S.updatePersona({ name: e.target.value || 'Dr. Jung' })} /></label>
+        <label class="row"><span class="row-label fixed">${t('name')}</span><input class="row-input" value=${p.name} onInput=${(e) => S.updatePersona({ name: e.target.value || S.DEFAULT_PERSONA.name })} /></label>
         <label class="row"><span class="row-label fixed">${t('icon')}</span><input class="row-input" value=${p.icon} placeholder=${t('emojiOk')} onInput=${(e) => S.updatePersona({ icon: e.target.value })} /></label>
       </div>
       ${field('role', t('role'), 5, t('roleHint'))}

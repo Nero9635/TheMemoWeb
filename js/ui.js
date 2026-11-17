@@ -242,7 +242,7 @@ export function usePostMenu() {
     }))} />`}
     ${history && html`<${VersionSheet} id=${history} onClose=${() => setHistory(null)} />`}
   `;
-  return { openMenu, openTags: setTagging, openMood: (memo) => setMooding(memo.id), openTime: setTiming, view };
+  return { openMenu, openTags: setTagging, openMood: (memo) => setMooding(memo.id), openTime: setTiming, openHistory: setHistory, view };
 }
 
 /** 長押し(0.5秒)を見分ける。指が動いたらやめる */
@@ -325,4 +325,49 @@ export function VersionSheet({ id, onClose }) {
       </div>`)}
     </div>
   </${Sheet}>`;
+}
+
+/**
+ * iOS のプルダウンメニュー。押したボタン(rect)の近くから、ふわっと広がって出る。
+ * sections: [[{label, icon, onClick, danger, disabled}], ...] 区切りごとの項目
+ */
+export function PopMenu({ rect, sections, onClose, title = '' }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const vw = window.innerWidth;
+  const vh = window.visualViewport?.height ?? window.innerHeight;
+  const width = Math.min(270, vw - 24);
+  const below = rect.top < vh / 2;
+  const right = Math.max(12, Math.min(vw - rect.right, vw - width - 12));
+  const pos = below ? `top:${rect.bottom + 8}px;max-height:${vh - rect.bottom - 24}px` : `bottom:${vh - rect.top + 8}px;max-height:${rect.top - 24}px`;
+  const originX = vw - right - (rect.left + rect.right) / 2 < width / 2 ? 'right' : 'center';
+  const list = sections.map((sec) => sec.filter(Boolean)).filter((sec) => sec.length);
+  return html`<div class="pop-backdrop" onClick=${onClose}>
+    <div class="pop-menu" role="menu" aria-label=${title || 'Menu'} onClick=${(e) => e.stopPropagation()}
+      style=${`${pos};right:${right}px;width:${width}px;transform-origin:${below ? 'top' : 'bottom'} ${originX}`}>
+      ${title && html`<div class="pop-title">${title}</div>`}
+      ${list.map((sec, i) => html`${i > 0 && html`<div class="pop-sep" aria-hidden="true"></div>`}
+        ${sec.map((it) => html`<button role="menuitem" class=${`pop-item ${it.danger ? 'danger' : ''}`} disabled=${it.disabled}
+          onClick=${() => { onClose(); it.onClick(); }}><span class="pop-label">${it.label}</span>${it.icon && html`<span class="pop-icon">${it.icon}</span>`}</button>`)}`)}
+    </div>
+  </div>`;
+}
+
+/** 下からせり上がる、操作のためのパネル(フォーマット・写真など)。後ろは暗くしない */
+export function Panel({ title, onClose, children }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  return html`<div class="panel-backdrop" onClick=${onClose}>
+    <div class="panel" role="dialog" aria-label=${title} onClick=${(e) => e.stopPropagation()}>
+      <div class="panel-head"><span class="panel-title">${title}</span>
+        <button class="panel-close" aria-label=${t('close')} onMouseDown=${(e) => e.preventDefault()} onClick=${onClose}>${Icon.close(16)}</button></div>
+      ${children}
+    </div>
+  </div>`;
 }

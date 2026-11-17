@@ -157,6 +157,31 @@ const D = {
     ['很棒', '不错', '一般', '低落', '难过', '生气', '疲惫', '平静'],
   ],
   writeDiary: ['Write about today…', '今日のことを書く…', '写写今天…'],
+  // ---- v15 ----
+  fmtTitle: ['Title', 'タイトル', '标题'],
+  fmtHeading: ['Heading', '見出し', '小标题'],
+  fmtSub: ['Subheading', '小見出し', '副标题'],
+  fmtBody: ['Body', '本文', '正文'],
+  fmtMono: ['Mono', '等幅', '等宽'],
+  // ---- v13 ----
+  blockH3: ['Heading 3', '見出し3', '标题 3'],
+  blockCallout: ['Callout', 'コールアウト', '标注'],
+  blockCode: ['Code', 'コード', '代码'],
+  duplicate: ['Duplicate', '複製', '复制块'],
+  insertNow: ['Insert date & time', '日時を入れる', '插入日期时间'],
+  copyBlock: ['Copy block', 'ブロックをコピー', '复制块文字'],
+  fmtStyle: ['Style', 'スタイル', '样式'],
+  fmtList: ['Lists', 'リスト', '列表'],
+  fmtBlock: ['Block', 'ブロック', '块'],
+  // ---- v12 ----
+  readMode: ['Read', '閲覧モード', '阅读模式'],
+  editMode: ['Edit', '編集モード', '编辑模式'],
+  mode: ['Mode', 'モード', '模式'],
+  nothingYet: ['Nothing written yet. Tap ✎ to write.', 'まだ何も書いていません。✎ を押すと書けます。', '还没有内容。点按 ✎ 开始写。'],
+  hideKeyboard: ['Hide keyboard', 'キーボードを閉じる', '收起键盘'],
+  aiAndPersona: ['AI and {name}', 'AI と {name}', 'AI 与 {name}'],
+  photoLibrary: ['Photo Library', '写真ライブラリ', '照片图库'],
+  takePhoto: ['Take Photo', '写真を撮る', '拍照'],
   // ---- v11 ----
   lineSpacing: ['Line spacing', '行間', '行距'],
   spacingTight: ['Tight', '狭い', '紧凑'],
@@ -220,8 +245,8 @@ const D = {
   moveUp: ['Move up', '上へ移動', '上移'],
   moveDown: ['Move down', '下へ移動', '下移'],
   deleteBlock: ['Delete block', 'ブロックを削除', '删除块'],
-  blockHint: ['Shortcuts: # Heading · - List · 1. Numbered · [] To-do · > Quote · --- Divider', 'ショートカット: # 見出し · - 箇条書き · 1. 番号 · [] ToDo · > 引用 · --- 区切り', '快捷方式: # 标题 · - 列表 · 1. 编号 · [] 待办 · > 引用 · --- 分隔线'],
-  format: ['Format', '書式', '格式'],
+  blockHint: ['Type at the start of a line: # ## ### Heading · - List · 1. Numbered · [] To-do · > Quote · ! Callout · ``` Code · --- Divider · / Menu', '行頭に入力: # ## ### 見出し · - 箇条書き · 1. 番号 · [] ToDo · > 引用 · ! コールアウト · ``` コード · --- 区切り · / メニュー', '在行首输入: # ## ### 标题 · - 列表 · 1. 编号 · [] 待办 · > 引用 · ! 标注 · ``` 代码 · --- 分隔线 · / 菜单'],
+  format: ['Format', 'フォーマット', '格式'],
 
   // ---- 設定 ----
   profileHint: ['Name and photo shown on your posts', '名前とアイコン(投稿に表示)', '帖子上显示的名字和头像'],
@@ -276,7 +301,7 @@ const D = {
 
   // ---- 人物 ----
   reset: ['Reset', 'リセット', '重置'],
-  confirmResetPersona: ['Reset to Dr. Jung? “About me” is kept.', 'ユング先生に戻しますか?「About me」は残ります。', '恢复为荣格博士?“关于我”会保留。'],
+  confirmResetPersona: ['Reset to the default AI? “About me” is kept.', '既定の AI に戻しますか?「About me」は残ります。', '恢复为默认 AI?“关于我”会保留。'],
   choosePhoto: ['Choose photo', '写真を選ぶ', '选择照片'],
   removePhotoBtn: ['Remove photo', '写真を外す', '移除照片'],
   name: ['Name', '名前', '名字'],

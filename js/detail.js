@@ -4,10 +4,10 @@ import * as S from './store.js';
 import { Icon } from './icons.js';
 import { t, yearL } from './i18n.js';
 import {
-  ProfileAvatar, PersonaAvatar, AiAvatar, AutoText, ActionSheet, TagSheet, TagPill, DateCapsule,
-  usePostMenu, ReplyItem, copyText, shareText, StarButton,
+  ProfileAvatar, PersonaAvatar, AiAvatar, AutoText, TagSheet, TagPill, DateCapsule,
+  usePostMenu, ReplyItem, copyText, shareText, StarButton, PopMenu, Panel,
 } from './ui.js';
-import { BlockEditor, TYPE_LABEL } from './editor.js';
+import { BlockEditor, BlockStatic, TYPE_LABEL, toggleTodo } from './editor.js';
 import { findUrls, formatDateTime, formatTime, hostOf } from './util.js';
 
 const lastMine = (memo) => memo.chat.map((c) => c.fromUser).lastIndexOf(true);
@@ -25,27 +25,27 @@ export function Detail({ id, reply = false }) {
   const st = S.state;
   const memo = S.getMemo(id);
   const [title, setTitle] = useState(memo?.title ?? '');
-  const [aiMenu, setAiMenu] = useState(false);
-  const [jungMenu, setJungMenu] = useState(false);
-  const [formatMenu, setFormatMenu] = useState(false);
+  // 閲覧モードと編集モード。何も書いていなければ編集、書いてあれば閲覧から始める
+  const [mode, setMode] = useState(() => (memo && !reply && S.isBlank(memo) ? 'edit' : 'read'));
+  const [pop, setPop] = useState(null); // {kind: 'more' | 'ai', rect}
+  const [panel, setPanel] = useState(null); // 'format' | 'photo'
   const [tagSheet, setTagSheet] = useState(false);
-  const [words, setWords] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
+  const [, force] = useState(0);
   const photoInput = useRef();
   const cameraInput = useRef();
   const editor = useRef({});
   const menu = usePostMenu();
   const replyBox = useRef();
-  // 返信欄はふだん隠しておき、吹き出しボタンで出し入れする
-  const [showReply, setShowReply] = useState(reply);
+  // 返信(コメント・会話・返信欄)は吹き出しボタンで出し入れする
+  const [thread, setThread] = useState(() => reply || (memo ? S.replyCount(memo) > 0 : false));
   const focusSoon = () => setTimeout(() => {
     const el = replyBox.current;
     if (!el) return;
     el.scrollIntoView({ block: 'end', behavior: 'smooth' });
     el.querySelector('textarea')?.focus();
   }, 60);
-  const focusReply = () => { setShowReply(true); focusSoon(); };
-  const toggleReply = () => { if (showReply) setShowReply(false); else focusReply(); };
+  const focusReply = () => { setThread(true); focusSoon(); };
   useEffect(() => { if (reply) setTimeout(focusSoon, 300); }, []);
   // 書き換え始めたら、元の中身を「以前の版」として残す
   useEffect(() => { S.beginEdit(id); }, []);
@@ -54,26 +54,76 @@ export function Detail({ id, reply = false }) {
   const p = st.settings.persona;
   const busy = st.busy?.memoId === id ? st.busy.task : null;
   const author = S.authorOf(p, memo.aiCommentBy ?? '', memo.aiCommentIcon ?? '');
+  const editing = mode === 'edit';
   // 本文を外から書き換えた時(AI の文章を足すなど)は、エディタを作り直して新しい中身を見せる
   const rebuild = () => setEditorKey((k) => k + 1);
   const append = (text) => { S.appendText(id, text); rebuild(); };
+  const withThread = (fn) => () => { setThread(true); fn(); };
+  const hasMine = memo.chat.some((c) => c.fromUser);
 
   const addFiles = async (files) => {
     const added = [];
     for (const f of files) { const n = await S.importImage(f); if (n) added.push(n); }
-    if (added.length) editor.current.insertImages(added);
+    if (!added.length) return;
+    if (editing && editor.current.insertImages) editor.current.insertImages(added);
+    else S.updateMemo(id, (m) => {
+      const blocks = [...m.blocks, ...added.map((image) => S.block('IMAGE', '', { image }))];
+      return { ...m, blocks, body: S.toPlainText(blocks) };
+    });
+    rebuild();
   };
   const urls = findUrls(memo.body);
   const hashtags = [...new Set(S.hashtagsIn(memo.body))];
+  const openPop = (kind) => (e) => setPop({ kind, rect: e.currentTarget.getBoundingClientRect() });
+  const openPanel = (kind) => { editor.current.blur?.(); setPanel(kind); };
+  const closePanel = () => { setPanel(null); if (editing) editor.current.refocus?.(); };
+  const toRead = () => { editor.current.blur?.(); setMode('read'); };
+
+  // AI と人物の操作(右上の「…」と、下の AI ボタンで共通)
+  const aiItems = [
+    [
+      { label: t('commentOf', { name: p.name }), icon: html`<span class="glyph">${S.personaGlyph(p)}</span>`, disabled: !!st.busy, onClick: withThread(() => S.commentOn(id)) },
+      hasMine && { label: t('askToReply', { name: p.name }), icon: Icon.reply(18), disabled: !!st.busy, onClick: withThread(() => S.askReply(id, lastMine(memo))) },
+    ],
+    [
+      { label: t('polishProse'), icon: Icon.sparkle(18), disabled: !!st.busy, onClick: withThread(() => S.polish(id, false)) },
+      { label: t('polishBullets'), icon: Icon.listBullet(18), disabled: !!st.busy, onClick: withThread(() => S.polish(id, true)) },
+      { label: t('expandIdeas'), icon: Icon.sparkle(18), disabled: !!st.busy, onClick: () => S.ideas(id) },
+      { label: t('titleTags'), icon: Icon.tag(18), disabled: !!st.busy, onClick: () => S.titleAndTags(id) },
+    ],
+  ];
+  const moreItems = [
+    [
+      editing ? { label: t('readMode'), icon: Icon.book(18), onClick: toRead } : { label: t('editMode'), icon: Icon.edit(18), onClick: () => setMode('edit') },
+    ],
+    ...aiItems,
+    [
+      { label: memo.starred ? t('unstar') : t('star'), icon: memo.starred ? Icon.starFill(18) : Icon.star(18), onClick: () => S.toggleStar(id) },
+      { label: t('tags'), icon: Icon.tag(18), onClick: () => setTagSheet(true) },
+      { label: memo.allDay ? t('changeDate') : t('changeTime'), icon: Icon.clock(18), onClick: () => menu.openTime(memo) },
+      S.versionsOf(id).length > 0 && { label: t('versionHistory'), icon: Icon.clock(18), onClick: () => menu.openHistory(id) },
+    ],
+    [
+      { label: t('copyText'), icon: Icon.copy(18), onClick: () => copyText(S.plainText(memo)) },
+      { label: t('share'), icon: Icon.share(18), onClick: () => shareText(S.plainText(memo)) },
+    ],
+    [
+      { label: t('delete'), icon: Icon.trash(18), danger: true, onClick: () => { if (confirm(t('confirmTrash'))) S.trashMemo(id); } },
+    ],
+  ];
+
+  const curType = panel === 'format' ? editor.current.currentType?.() : null;
+  const setType = (type) => { editor.current.setType(type); setTimeout(() => force((n) => n + 1), 30); };
 
   return html`<div class="screen">
-    <${NavBar} title=${memo.allDay ? t('diary') : t('post')} right=${html`<div class="glass-group">
-      <button class="glass-icon" aria-label="AI" disabled=${!!st.busy} onClick=${() => setAiMenu(true)}>${Icon.sparkle(20)}</button>
-      <button class="glass-icon glyph-btn" aria-label=${p.name} disabled=${!!st.busy} onClick=${() => setJungMenu(true)}>${S.personaGlyph(p)}</button>
-      <button class="glass-icon" aria-label=${t('more')} onClick=${() => menu.openMenu(memo)}>${Icon.more(18)}</button>
-    </div>`} />
+    <${NavBar} title=${memo.allDay ? t('diary') : t('post')} right=${html`
+      <div class="mode-switch glass-group" role="radiogroup" aria-label=${t('mode')}>
+        <button class=${`mode-btn ${editing ? 'on' : ''}`} role="radio" aria-checked=${editing} aria-label=${t('editMode')} onClick=${() => setMode('edit')}>${Icon.edit(18)}</button>
+        <button class=${`mode-btn ${editing ? '' : 'on'}`} role="radio" aria-checked=${!editing} aria-label=${t('readMode')} onClick=${toRead}>${Icon.book(18)}</button>
+      </div>
+      <button class="glass-icon nav-more" aria-label=${t('more')} aria-haspopup="menu" onClick=${openPop('more')}>${busy ? html`<span class="spinner"></span>` : Icon.more(18)}</button>`} />
 
-    <div class="scroll detail">
+    <div class=${`scroll detail ${editing ? 'editing' : 'reading'}`}>
       <div class="detail-head">
         <${ProfileAvatar} size=${44} />
         <div class="flex"><div class="name-lg">${st.settings.profileName}</div>
@@ -83,43 +133,55 @@ export function Detail({ id, reply = false }) {
         <${DateCapsule} date=${S.memoDate(memo)} small time=${memo.allDay ? '' : formatTime(memo.createdAt)}
           label=${memo.allDay ? t('changeDate') : t('changeTime')} onClick=${() => menu.openTime(memo)} />
       </div>
-      <input class="title-input" placeholder=${t('titleOptional')} aria-label=${t('titleOptional')} value=${title}
-        onInput=${(e) => { setTitle(e.target.value); S.setMemoTitle(id, e.target.value); }} />
-      <${BlockEditor} key=${editorKey} memo=${memo} focusRef=${editor} />
-      <button class="tap-to-write" aria-label=${t('write')} onClick=${() => editor.current.focusEnd()}></button>
+
+      ${editing
+        ? html`<input class="title-input" placeholder=${t('titleOptional')} aria-label=${t('titleOptional')} value=${title}
+            onInput=${(e) => { setTitle(e.target.value); S.setMemoTitle(id, e.target.value); }} />`
+        : memo.title.trim() && html`<h1 class="title-view">${memo.title}</h1>`}
+
+      <!-- タグ: タイトルと本文の間 -->
+      ${(editing || memo.tags.length > 0) && html`<div class="tag-line">
+        ${memo.tags.map((tg) => html`<${TagPill} name=${tg} onClick=${() => setTagSheet(true)} />`)}
+        ${editing && html`<button class="tag-add" onClick=${() => setTagSheet(true)}>${Icon.tag(14)} ${memo.tags.length ? t('edit') : t('addTag')}</button>`}
+      </div>`}
+
+      ${editing
+        ? html`<${BlockEditor} key=${editorKey} memo=${memo} focusRef=${editor} />
+          <button class="tap-to-write" aria-label=${t('write')} onClick=${() => editor.current.focusEnd()}></button>`
+        : html`<div class="read-body" onDblClick=${() => setMode('edit')}>
+            ${S.isBlank(memo) ? html`<p class="muted read-empty">${t('nothingYet')}</p>`
+              : html`<${BlockStatic} memo=${memo} onToggle=${(bid) => toggleTodo(memo, bid)} />`}
+          </div>`}
 
       ${(urls.length > 0 || hashtags.length > 0) && html`<div class="pills pad">
         ${urls.map((u) => html`<a class="link-chip" href=${u} target="_blank" rel="noopener">${Icon.link(14)} ${hostOf(u)}</a>`)}
         ${hashtags.map((h) => html`<button class="link-chip hashtag-chip" onClick=${() => S.open({ name: 'search', q: `#${h}` })}>#${h}</button>`)}
       </div>`}
-      ${memo.tags.length > 0 && html`<div class="pills pad">
-        ${memo.tags.map((tg) => html`<${TagPill} name=${tg} onClick=${() => setTagSheet(true)} />`)}
-      </div>`}
       ${(memo.place || memo.weather || memo.steps != null) && html`<div class="meta-line muted">${[memo.place, memo.weather, memo.steps != null ? t('steps', { n: memo.steps }) : ''].filter(Boolean).join(' · ')}</div>`}
 
-      <!-- 書くための道具: スクロールしても画面の下に残り、下までスクロールするとボタン列の上に止まる -->
-      <div class="tools-sticky">
-        ${words && html`<div class="word-row">${[...st.quickWords].sort((a, b) => b.uses - a.uses).map((w) => html`<button class="word"
-          onMouseDown=${(e) => e.preventDefault()} onClick=${() => { S.useWord(w.text); editor.current.insertText(w.text); }}>${w.text}</button>`)}</div>`}
-        <div class="toolbar glass">
-          <button class="tb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => setFormatMenu(true)}><span class="aa">Aa</span></button>
-          <button class="tb-btn" aria-label=${t('photo')} onClick=${() => photoInput.current.click()}>${Icon.photo(22)}</button>
-          <button class="tb-btn" aria-label=${t('camera')} onClick=${() => cameraInput.current.click()}>${Icon.camera(22)}</button>
-          <button class="tb-btn" aria-label=${t('tags')} onClick=${() => setTagSheet(true)}>${Icon.tag(20)}</button>
-          <span class="flex"></span>
-          <button class=${`capsule-btn ${words ? 'on' : ''}`} onMouseDown=${(e) => e.preventDefault()} onClick=${() => setWords(!words)}>${t('words')}</button>
+      <!-- 編集モードの道具: 中央の小さなガラスのカプセル。スクロールしても下に残る -->
+      ${editing && html`<div class="tools-sticky">
+        <div class="edit-bar" role="toolbar" aria-label=${t('format')}>
+          <button class="eb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => openPanel('format')}><span class="aa">Aa</span></button>
+          <button class="eb-btn" aria-label=${t('blockTodo')} onMouseDown=${(e) => e.preventDefault()}
+            onClick=${() => setType(editor.current.currentType?.() === 'TODO' ? 'PARAGRAPH' : 'TODO')}>${Icon.checklist(22)}</button>
+          <button class="eb-btn" aria-label=${t('photo')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => openPanel('photo')}>${Icon.photoCamera(22)}</button>
+          <span class="eb-sep" aria-hidden="true"></span>
+          <button class="eb-btn" aria-label=${t('hideKeyboard')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => editor.current.blur?.()}>${Icon.keyboardDown(22)}</button>
         </div>
-      </div>
+      </div>`}
 
       <div class="detail-actions">
-        <button class=${`act ${showReply ? 'on' : ''}`} aria-label=${t('reply')} aria-expanded=${showReply} onClick=${toggleReply}>${Icon.reply(20)}${memo.chat.length > 0 && html`<span>${memo.chat.length}</span>`}</button>
-        <button class=${`act glyph-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('commentOf', { name: p.name })} disabled=${!!st.busy} onClick=${() => S.commentOn(id)}>${busy === 'comment' ? html`<span class="spinner"></span>` : S.personaGlyph(p)}</button>
-        <button class="act" aria-label=${t('polishAi')} disabled=${!!st.busy} onClick=${() => S.polish(id, false)}>${busy === 'polish' ? html`<span class="spinner"></span>` : Icon.sparkle(20)}</button>
+        <button class=${`act ${thread ? 'on' : ''}`} aria-label=${t('reply')} aria-expanded=${thread} onClick=${() => (thread ? setThread(false) : focusReply())}>
+          ${Icon.reply(20)}${S.replyCount(memo) > 0 && html`<span>${S.replyCount(memo)}</span>`}</button>
+        <button class=${`act ai-act ${memo.aiComment ? 'persona-color' : ''}`} aria-label=${t('aiAndPersona', { name: p.name })} aria-haspopup="menu" onClick=${openPop('ai')}>
+          ${busy ? html`<span class="spinner"></span>` : Icon.sparkle(20)}</button>
         <${StarButton} memo=${memo} />
         <button class="act" aria-label=${t('share')} onClick=${() => shareText(S.plainText(memo))}>${Icon.share(20)}</button>
       </div>
       ${(busy === 'ideas' || busy === 'title') && html`<div class="pad muted"><div class="progress"><span></span></div>${busy === 'ideas' ? t('expanding') : t('findingTitle')}</div>`}
 
+      ${(thread || busy === 'comment' || busy === 'polish' || busy === 'chat') && html`<div class="thread">
       ${(memo.aiComment || busy === 'comment') && html`<${ReplyItem} avatar=${html`<${PersonaAvatar} by=${memo.aiComment ? memo.aiCommentBy ?? '' : null} icon=${memo.aiCommentIcon ?? ''} />`}
         name=${memo.aiComment ? author.name : p.name} meta=${t('replyingTo', { name: st.settings.profileName })} busy=${busy === 'comment'} foldable=${memo.aiComment.length > 160}
         menu=${[
@@ -164,8 +226,9 @@ export function Detail({ id, reply = false }) {
         </${ReplyItem}>
         ${busy === 'chat' && st.busy.index === i && html`<${ReplyItem} avatar=${html`<${PersonaAvatar} />`} name=${p.name} meta=${t('reply')} busy=${true}><span></span></${ReplyItem}>`}
       </div>`)}
-      ${showReply && html`<div class="reply-compose" ref=${replyBox}>
+      ${thread && html`<div class="reply-compose" ref=${replyBox}>
         <${ReplyComposer} id=${id} persona=${p} />
+      </div>`}
       </div>`}
       <p class="footnote">${t('updated', { d: formatDateTime(memo.updatedAt) })}</p>
     </div>
@@ -173,24 +236,48 @@ export function Detail({ id, reply = false }) {
     <input ref=${photoInput} type="file" accept="image/*" multiple hidden onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
     <input ref=${cameraInput} type="file" accept="image/*" capture="environment" hidden onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
 
-    ${formatMenu && html`<${ActionSheet} title=${`${t('turnInto')}  ·  ${t('blockHint')}`} onClose=${() => setFormatMenu(false)} items=${[
-      ...S.BLOCK_TYPES.map((type) => ({ label: TYPE_LABEL()[type], onClick: () => editor.current.setType(type) })),
-      { divider: true },
-      { label: t('moveUp'), onClick: () => editor.current.move(-1) },
-      { label: t('moveDown'), onClick: () => editor.current.move(1) },
-      { label: t('deleteBlock'), danger: true, onClick: () => editor.current.removeCurrent() },
-    ]} />`}
-    ${aiMenu && html`<${ActionSheet} title="AI" onClose=${() => setAiMenu(false)} items=${[
-      { label: t('polishProse'), onClick: () => S.polish(id, false) },
-      { label: t('polishBullets'), onClick: () => S.polish(id, true) },
-      { label: t('expandIdeas'), onClick: () => S.ideas(id) },
-      { label: t('titleTags'), onClick: () => S.titleAndTags(id) },
-    ]} />`}
-    ${jungMenu && html`<${ActionSheet} title=${p.name} onClose=${() => setJungMenu(false)} items=${[
-      { label: t('comment'), onClick: () => S.commentOn(id) },
-      { label: t('askToReply', { name: p.name }), disabled: !memo.chat.some((c) => c.fromUser), onClick: () => S.askReply(id, lastMine(memo)) },
-      { label: t('reply'), onClick: focusReply },
-    ]} />`}
+    ${panel === 'format' && html`<${Panel} title=${t('format')} onClose=${closePanel}>
+      <div class="fmt-styles" role="radiogroup" aria-label=${t('fmtStyle')}>
+        ${[['HEADING1', 'fmtTitle'], ['HEADING2', 'fmtHeading'], ['HEADING3', 'fmtSub'], ['PARAGRAPH', 'fmtBody'], ['CODE', 'fmtMono']].map(([type, key]) => html`<button role="radio"
+          aria-checked=${curType === type} class=${`fmt-style fmt-${type.toLowerCase()} ${curType === type ? 'on' : ''}`}
+          onMouseDown=${(e) => e.preventDefault()} onClick=${() => setType(type)}>${t(key)}</button>`)}
+      </div>
+      <div class="fmt-groups">
+        <div class="fmt-group" role="group" aria-label=${t('fmtList')}>
+          ${[['BULLET', Icon.listBullet(22)], ['NUMBERED', Icon.listNumber(22)], ['TODO', Icon.checklist(22)]].map(([type, icon]) => html`<button
+            class=${`fmt-btn ${curType === type ? 'on' : ''}`} aria-label=${TYPE_LABEL()[type]} aria-pressed=${curType === type} title=${TYPE_LABEL()[type]}
+            onMouseDown=${(e) => e.preventDefault()} onClick=${() => setType(curType === type ? 'PARAGRAPH' : type)}>${icon}</button>`)}
+        </div>
+        <div class="fmt-group" role="group" aria-label=${t('fmtBlock')}>
+          ${[['QUOTE', Icon.quote(22)], ['CALLOUT', Icon.bulb(22)]].map(([type, icon]) => html`<button
+            class=${`fmt-btn ${curType === type ? 'on' : ''}`} aria-label=${TYPE_LABEL()[type]} aria-pressed=${curType === type} title=${TYPE_LABEL()[type]}
+            onMouseDown=${(e) => e.preventDefault()} onClick=${() => setType(curType === type ? 'PARAGRAPH' : type)}>${icon}</button>`)}
+          <button class="fmt-btn" aria-label=${TYPE_LABEL().DIVIDER} title=${TYPE_LABEL().DIVIDER} onMouseDown=${(e) => e.preventDefault()} onClick=${() => setType('DIVIDER')}>${Icon.divider(22)}</button>
+        </div>
+      </div>
+      <div class="fmt-groups">
+        <div class="fmt-group" role="group" aria-label=${t('moveUp')}>
+          <button class="fmt-btn" aria-label=${t('moveUp')} title=${t('moveUp')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => editor.current.move(-1)}>${Icon.arrowUp(20)}</button>
+          <button class="fmt-btn" aria-label=${t('moveDown')} title=${t('moveDown')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => editor.current.move(1)}>${Icon.arrowDown(20)}</button>
+        </div>
+        <div class="fmt-group" role="group" aria-label=${t('duplicate')}>
+          <button class="fmt-btn" aria-label=${t('duplicate')} title=${t('duplicate')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => { editor.current.duplicate(); force((n) => n + 1); }}>${Icon.copy(20)}</button>
+          <button class="fmt-btn" aria-label=${t('insertNow')} title=${t('insertNow')} onMouseDown=${(e) => e.preventDefault()}
+            onClick=${() => { editor.current.insertText(`${formatDateTime(Date.now())} `); setPanel(null); }}>${Icon.clock(20)}</button>
+        </div>
+        <div class="fmt-group single" role="group" aria-label=${t('deleteBlock')}>
+          <button class="fmt-btn danger" aria-label=${t('deleteBlock')} title=${t('deleteBlock')} onMouseDown=${(e) => e.preventDefault()}
+            onClick=${() => { editor.current.removeCurrent(); setPanel(null); }}>${Icon.trash(20)}</button>
+        </div>
+      </div>
+    </${Panel}>`}
+    ${panel === 'photo' && html`<${Panel} title=${t('photo')} onClose=${closePanel}>
+      <div class="photo-choices">
+        <button class="photo-choice" onClick=${() => { setPanel(null); photoInput.current.click(); }}>${Icon.photo(30)}<span>${t('photoLibrary')}</span></button>
+        <button class="photo-choice" onClick=${() => { setPanel(null); cameraInput.current.click(); }}>${Icon.camera(30)}<span>${t('takePhoto')}</span></button>
+      </div>
+    </${Panel}>`}
+    ${pop && html`<${PopMenu} rect=${pop.rect} sections=${pop.kind === 'ai' ? aiItems : moreItems} title=${pop.kind === 'ai' ? (p.name.includes('AI') ? p.name : `AI · ${p.name}`) : ''} onClose=${() => setPop(null)} />`}
     ${tagSheet && html`<${TagSheet} selected=${memo.tags} onChange=${(tg) => S.setMemoTags(id, tg)} onClose=${() => setTagSheet(false)} />`}
     ${st.suggestion?.memoId === id && html`<${Suggestion} s=${st.suggestion} onTitle=${(v) => setTitle(v)} onAppend=${append} />`}
     ${menu.view}

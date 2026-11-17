@@ -6,9 +6,11 @@ import { t, setLang } from './i18n.js';
 
 // ---- 人物(AI character) ----
 
-export const DEFAULT_PERSONA = {
+/** 前の版の既定の人物(ユング先生)。まだ自分で変えていなければ、新しい既定に置きかえる */
+const OLD_DEFAULT_NAME = 'Dr. Jung';
+export const JUNG_PERSONA = {
   name: 'Dr. Jung',
-  icon: 'Ψ',
+  icon: 'J',
   image: '',
   role: '分析心理学を創始したカール・グスタフ・ユング博士(ユング先生)。'
     + '病気や症状、診断、治療といった病理の話はせず、日々の気づき・創造性・心の成長に目を向けます。'
@@ -19,14 +21,28 @@ export const DEFAULT_PERSONA = {
   aboutUser: '',
 };
 
+/** 既定の人物: 特定の人物ではない、あなた専用の AI */
+export const DEFAULT_PERSONA = {
+  name: 'My AI',
+  icon: '✦',
+  image: '',
+  role: 'ユーザーのメモや日記をていねいに読み、そこに表れた思いや関心を言葉にして返す、思慮深い相棒。'
+    + '決めつけず、気づきを仮説としてやわらかく示し、本人が自分で考えを深められる問いを1つ添えます。'
+    + '病気や診断の話はせず、日々の気づき・創造性・成長に目を向けます。',
+  style: '穏やかで温かく、簡潔な語り口。相手を「あなた」と呼ぶ。',
+  aboutUser: '',
+};
+
 export function personaGlyph(p) {
-  return graphemes((p.icon || '').trim() || (p.name || '').trim().slice(0, 1) || 'Ψ', 2);
+  // 三叉(Ψ)は使わない。前の版のコメントに残っていても ✦ で出す
+  const icon = (p.icon || '').trim().replace('Ψ', '');
+  return graphemes(icon || (p.name || '').trim().slice(0, 1) || '✦', 2);
 }
 
 /** コメントを書いた人物。by が null なら今の人物、空なら人物を選べる前のコメント(ユング先生) */
 export function authorOf(current, by, icon) {
   if (by == null) return current;
-  if (!by) return current.name === DEFAULT_PERSONA.name ? current : DEFAULT_PERSONA;
+  if (!by) return current.name === OLD_DEFAULT_NAME ? current : { ...JUNG_PERSONA, icon: '✦' };
   if (by === current.name) return current;
   return { ...DEFAULT_PERSONA, name: by, icon, image: '' };
 }
@@ -85,7 +101,7 @@ const TRASH_DAYS = 30;
 // ---- 本文(ブロック) ----
 
 /** ブロックの形式。DIVIDER は Android 版では「---」の段落として見える */
-export const BLOCK_TYPES = ['PARAGRAPH', 'HEADING1', 'HEADING2', 'BULLET', 'NUMBERED', 'TODO', 'QUOTE', 'DIVIDER'];
+export const BLOCK_TYPES = ['PARAGRAPH', 'HEADING1', 'HEADING2', 'HEADING3', 'BULLET', 'NUMBERED', 'TODO', 'QUOTE', 'CALLOUT', 'CODE', 'DIVIDER'];
 
 export function block(type = 'PARAGRAPH', text = '', extra = {}) {
   return { id: uuid(), type, text: type === 'DIVIDER' ? '---' : text, checked: false, image: '', comment: '', ...extra };
@@ -93,7 +109,7 @@ export function block(type = 'PARAGRAPH', text = '', extra = {}) {
 
 /** 行頭の記号(Notion と同じ書き方)と形式 */
 export const SHORTCUTS = [
-  [/^##\s/, 'HEADING2'], [/^#\s/, 'HEADING1'], [/^[-*・]\s?/, 'BULLET'], [/^\d+[.)]\s/, 'NUMBERED'],
+  [/^###\s/, 'HEADING3'], [/^##\s/, 'HEADING2'], [/^#\s/, 'HEADING1'], [/^```\s/, 'CODE'], [/^!\s/, 'CALLOUT'], [/^[-*・]\s?/, 'BULLET'], [/^\d+[.)]\s/, 'NUMBERED'],
   [/^\[\s?\]\s?/, 'TODO'], [/^\[x\]\s?/i, 'TODO_DONE'], [/^>\s?/, 'QUOTE'],
 ];
 
@@ -136,6 +152,7 @@ export function toPlainText(blocks) {
       case 'NUMBERED': return `${n}. ${b.text}`;
       case 'TODO': return (b.checked ? '☑ ' : '☐ ') + b.text;
       case 'QUOTE': return `> ${b.text}`;
+      case 'CALLOUT': return `💡 ${b.text}`;
       default: return b.text;
     }
   }).filter((t) => t !== null).join('\n');
@@ -236,6 +253,12 @@ export async function init() {
   for (const m of expired) await deleteForever(m.id, all);
   state.memos = all.filter((m) => !expired.includes(m));
   state.settings = { ...DEFAULT_SETTINGS, ...(settings ?? {}), persona: { ...DEFAULT_PERSONA, ...(settings?.persona ?? {}) } };
+  // 前の版の既定(ユング先生)のままなら、新しい既定の人物にする(「About me」は残す)
+  const op = state.settings.persona;
+  if (op.name === OLD_DEFAULT_NAME && (op.icon === 'Ψ' || !op.icon) && !op.image && op.role === JUNG_PERSONA.role) {
+    state.settings.persona = { ...DEFAULT_PERSONA, aboutUser: op.aboutUser ?? '' };
+    db.set('settings', state.settings);
+  }
   setLang(state.settings.language);
   state.tags = tags ?? DEFAULT_TAGS[state.settings.language].map(defaultTag);
   if (!tags) db.set('tags', state.tags);
