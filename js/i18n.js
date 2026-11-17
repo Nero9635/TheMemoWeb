@@ -157,6 +157,7 @@ const D = {
     ['很棒', '不错', '一般', '低落', '难过', '生气', '疲惫', '平静'],
   ],
   writeDiary: ['Write about today…', '今日のことを書く…', '写写今天…'],
+  slashHint: ['Type “/” for commands', '「/」でメニュー', '输入“/”打开菜单'],
   // ---- v15 ----
   fmtTitle: ['Title', 'タイトル', '标题'],
   fmtHeading: ['Heading', '見出し', '小标题'],

@@ -33,6 +33,7 @@ export function Detail({ id, reply = false }) {
   const [editorKey, setEditorKey] = useState(0);
   const [focusKind, setFocusKind] = useState(null);
   const blurTimer = useRef(null);
+  const titleRef = useRef(null);
   const [, force] = useState(0);
   const photoInput = useRef();
   const cameraInput = useRef();
@@ -118,7 +119,7 @@ export function Detail({ id, reply = false }) {
 
   // どこに書いているか: 本文・タイトル(editor)/ 返信欄(reply)
   const kindOf = (el) => (!el ? null : el.closest?.('.reply-compose') ? 'reply'
-    : el.closest?.('.blocks') || el.classList?.contains('title-input') ? 'editor' : null);
+    : el.closest?.('.ce') || el.classList?.contains('title-input') ? 'editor' : null);
   const onFocusIn = (e) => { clearTimeout(blurTimer.current); setFocusKind(kindOf(e.target)); };
   const onFocusOut = () => {
     clearTimeout(blurTimer.current);
@@ -147,7 +148,12 @@ export function Detail({ id, reply = false }) {
       </div>
 
       ${editing
-        ? html`<input class="title-input" placeholder=${t('titleOptional')} aria-label=${t('titleOptional')} value=${title}
+        ? html`<input class="title-input" ref=${titleRef} enterkeyhint="next" placeholder=${t('titleOptional')} aria-label=${t('titleOptional')} value=${title}
+            onKeyDown=${(e) => {
+              // タイトルで Return / ↓ → 本文のいちばん上へ(Notion と同じ)
+              if (e.isComposing || e.keyCode === 229) return;
+              if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); editor.current.focusStart?.(); }
+            }}
             onInput=${(e) => { setTitle(e.target.value); S.setMemoTitle(id, e.target.value); }} />`
         : memo.title.trim() && html`<h1 class="title-view">${memo.title}</h1>`}
 
@@ -158,7 +164,8 @@ export function Detail({ id, reply = false }) {
       </div>`}
 
       ${editing
-        ? html`<${BlockEditor} key=${editorKey} memo=${memo} focusRef=${editor} />
+        ? html`<${BlockEditor} key=${editorKey} memo=${memo} focusRef=${editor}
+            onExitTop=${() => { const el = titleRef.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }} />
           ${!typing && html`<button class="tap-to-write" aria-label=${t('write')} onClick=${() => editor.current.focusEnd()}></button>`}`
         : html`<div class="read-body" onDblClick=${() => setMode('edit')}>
             ${S.isBlank(memo) ? html`<p class="muted read-empty">${t('nothingYet')}</p>`

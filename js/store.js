@@ -109,8 +109,8 @@ export function block(type = 'PARAGRAPH', text = '', extra = {}) {
 
 /** 行頭の記号(Notion と同じ書き方)と形式 */
 export const SHORTCUTS = [
-  [/^###\s/, 'HEADING3'], [/^##\s/, 'HEADING2'], [/^#\s/, 'HEADING1'], [/^```\s/, 'CODE'], [/^!\s/, 'CALLOUT'], [/^[-*・]\s?/, 'BULLET'], [/^\d+[.)]\s/, 'NUMBERED'],
-  [/^\[\s?\]\s?/, 'TODO'], [/^\[x\]\s?/i, 'TODO_DONE'], [/^>\s?/, 'QUOTE'],
+  [/^###\s/, 'HEADING3'], [/^##\s/, 'HEADING2'], [/^#\s/, 'HEADING1'], [/^```\s/, 'CODE'], [/^!\s/, 'CALLOUT'], [/^[-*+・]\s?/, 'BULLET'], [/^\d+[.)]\s/, 'NUMBERED'],
+  [/^\[\s?\]\s?/, 'TODO'], [/^\[x\]\s?/i, 'TODO_DONE'], [/^>\s?/, 'QUOTE'], [/^["“”]\s/, 'QUOTE'],
 ];
 
 /**
