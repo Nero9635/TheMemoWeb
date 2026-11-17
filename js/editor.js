@@ -287,6 +287,32 @@ function placeCaret(blockEl, pos) {
   sel.addRange(r);
 }
 
+// ---------- 行全体の書式 ----------
+
+const CMD_TAGS = { bold: ['B', 'STRONG'], italic: ['I', 'EM'], underline: ['U'], strikeThrough: ['S', 'STRIKE', 'DEL'] };
+
+/** 行の文字すべてに、その書式が付いていれば外し、そうでなければ付ける */
+function toggleLineMark(el, cmd) {
+  const names = CMD_TAGS[cmd];
+  if (!names) return;
+  const texts = [];
+  const walk = (x) => { for (const c of x.childNodes) { if (c.nodeType === 3) { if (c.data) texts.push(c); } else if (c.nodeType === 1) walk(c); } };
+  walk(el);
+  if (!texts.length) return;
+  const marked = (t) => { for (let n = t.parentNode; n && n !== el; n = n.parentNode) if (names.includes(n.nodeName)) return true; return false; };
+  const all = texts.every(marked);
+  // いったん、この書式をすべて外す
+  el.querySelectorAll(names.join(',')).forEach((n) => n.replaceWith(...n.childNodes));
+  if (all) return;
+  // 行の中身(最後の高さ用の <br> 以外)をまとめて包む
+  const kids = [...el.childNodes];
+  const last = kids[kids.length - 1];
+  const keep = last && last.nodeName === 'BR' ? last : null;
+  const wrap = document.createElement(names[0].toLowerCase());
+  kids.forEach((k) => { if (k !== keep) wrap.appendChild(k); });
+  el.insertBefore(wrap, keep);
+}
+
 // ---------- エディタ ----------
 
 export function BlockEditor({ memo, focusRef, onBlockMenu }) {
@@ -629,10 +655,22 @@ export function BlockEditor({ memo, focusRef, onBlockMenu }) {
       const el = (lr && byId(lr.a)) || currentEl();
       return el?.dataset.align || 'left';
     },
+    /** 「+」から開く時: その行をパネルの対象にする */
+    menuFor: (id) => {
+      if (!id || !byId(id)) return;
+      lastCaret.current = { id, pos: lastCaret.current?.id === id ? lastCaret.current.pos : 0 };
+      lastRange.current = { a: id, ap: lastCaret.current.pos, z: id, zp: lastCaret.current.pos };
+    },
     format: (cmd) => {
       const lr = lastRange.current;
       const a = lr && byId(lr.a);
       const z = lr && byId(lr.z);
+      // 文字を選んでいない時は、その行全体に付ける / 外す(キーボードを呼ばず、行の中身に直接)
+      if (!lr || (lr.a === lr.z && lr.ap === lr.zp)) {
+        const el = a ?? currentEl();
+        if (el && TEXT_TYPES.includes(el.dataset.type)) { toggleLineMark(el, cmd); save(); }
+        return;
+      }
       root()?.focus({ preventScroll: true });
       if (a && z) {
         const p = pointAt(a, lr.ap);
@@ -793,7 +831,8 @@ export function BlockEditor({ memo, focusRef, onBlockMenu }) {
 
   return html`<div class="editor-host" ref=${host}>
     <button class="blk-plus" ref=${plusRef} style="display:none" aria-label=${t('format')} tabindex="-1"
-      onMouseDown=${(e) => e.preventDefault()} onClick=${() => onBlockMenu?.()}>${Icon.plus(18)}</button>
+      onPointerDown=${(e) => { e.preventDefault(); const id = plusFor.current; focusRef.current.menuFor?.(id); onBlockMenu?.(); }}
+      onClick=${(e) => e.preventDefault()}>${Icon.plus(18)}</button>
     ${slash && html`<div class="slash-menu" role="menu" aria-label=${t('turnInto')} style=${`top:${slash.top}px;left:${slash.left}px`}>
       ${S.BLOCK_TYPES.map((type) => html`<button role="menuitem" class="slash-item" onMouseDown=${(e) => e.preventDefault()} onClick=${() => pickSlash(type)}>
         <span class="slash-icon">${TYPE_ICON[type]}</span>${TYPE_LABEL()[type]}</button>`)}
