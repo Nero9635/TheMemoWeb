@@ -31,7 +31,7 @@ function App() {
     document.documentElement.style.setProperty('--ts', String(S.TEXT_SIZES[st.settings.textSize] ?? 1));
     document.documentElement.dataset.font = st.settings.writingFont === 'serif' ? 'serif' : 'default';
     document.documentElement.style.setProperty('--ed-lh', String(S.LINE_SPACINGS[st.settings.lineSpacing] ?? 1.6));
-    document.documentElement.style.setProperty('--ed-side', `${S.EDITOR_MARGINS[st.settings.editorMargin] ?? 16}px`);
+    document.documentElement.style.setProperty('--ed-side', `min(${S.EDITOR_MARGINS[st.settings.editorMargin] ?? 16}px, 16vw)`);
   }, [st.settings.theme, st.settings.textSize, st.settings.writingFont, st.settings.lineSpacing, st.settings.editorMargin]);
 
   if (!st.ready) return html`<div class="loading"></div>`;

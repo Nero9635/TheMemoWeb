@@ -91,7 +91,7 @@ export function Detail({ id, reply = false }) {
   const closePanel = () => { setPanel(null); if (editing) editor.current.refocus?.(); };
   const toRead = () => { editor.current.blur?.(); setMode('read'); };
 
-  // AI と人物の操作(右上の「…」と、下の AI ボタンで共通)
+  // AI と人物の操作(閲覧モードの本文の下の AI ボタンだけ)
   const aiItems = [
     [
       { label: t('commentOf', { name: p.name }), icon: html`<span class="glyph">${S.personaGlyph(p)}</span>`, disabled: !!st.busy, onClick: withThread(() => S.commentOn(id)) },
@@ -100,7 +100,7 @@ export function Detail({ id, reply = false }) {
     [
       { label: t('polishProse'), icon: Icon.sparkle(18), disabled: !!st.busy, onClick: withThread(() => S.polish(id, false)) },
       { label: t('polishBullets'), icon: Icon.listBullet(18), disabled: !!st.busy, onClick: withThread(() => S.polish(id, true)) },
-      { label: t('expandIdeas'), icon: Icon.sparkle(18), disabled: !!st.busy, onClick: () => S.ideas(id) },
+      { label: t('expandIdeas'), icon: Icon.sparkle(18), disabled: !!st.busy, onClick: withThread(() => S.ideas(id)) },
       { label: t('titleTags'), icon: Icon.tag(18), disabled: !!st.busy, onClick: () => S.titleAndTags(id) },
     ],
   ];
@@ -108,7 +108,6 @@ export function Detail({ id, reply = false }) {
     [
       editing ? { label: t('readMode'), icon: Icon.book(18), onClick: toRead } : { label: t('editMode'), icon: Icon.edit(18), onClick: () => setMode('edit') },
     ],
-    ...aiItems,
     [
       { label: memo.starred ? t('unstar') : t('star'), icon: memo.starred ? Icon.starFill(18) : Icon.star(18), onClick: () => S.toggleStar(id) },
       { label: t('tags'), icon: Icon.tag(18), onClick: () => setTagSheet(true) },
@@ -180,8 +179,8 @@ export function Detail({ id, reply = false }) {
               : html`<${BlockStatic} memo=${memo} onToggle=${(bid) => toggleTodo(memo, bid)} />`}
           </div>`}
 
-      <!-- 入力中は本文の下のもの(ボタン・更新日時・返信)を隠す。最後の行の下は道具と 2 行分の余白だけになる -->
-      ${!typing && html`<div class="below-text">
+      <!-- 編集モードでは本文の下のもの(返信・AI・お気に入り・共有・更新日時)を出さない。閲覧モードでだけ見せる -->
+      ${!editing && html`<div class="below-text">
       ${(urls.length > 0 || hashtags.length > 0) && html`<div class="pills pad">
         ${urls.map((u) => html`<a class="link-chip" href=${u} target="_blank" rel="noopener">${Icon.link(14)} ${hostOf(u)}</a>`)}
         ${hashtags.map((h) => html`<button class="link-chip hashtag-chip" onClick=${() => S.open({ name: 'search', q: `#${h}` })}>#${h}</button>`)}

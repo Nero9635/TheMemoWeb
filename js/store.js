@@ -93,8 +93,9 @@ export function moodLabel(key) {
 /** 文字の大きさ(設定の S / M / L / XL) */
 export const TEXT_SIZES = { s: 0.9, m: 1, l: 1.15, xl: 1.3 };
 /** 編集画面の行の間隔と、左右の余白 */
-export const LINE_SPACINGS = { s: 1.4, m: 1.6, l: 1.9 };
-export const EDITOR_MARGINS = { s: 8, m: 16, l: 36 };
+// v36: 幅を広げた(左から順に並ぶ。s・m・l は以前と同じ値)
+export const LINE_SPACINGS = { xxs: 1.15, xs: 1.3, s: 1.4, m: 1.6, l: 1.9, xl: 2.2, xxl: 2.6, xxxl: 3.0 };
+export const EDITOR_MARGINS = { none: 0, xs: 4, s: 8, m: 16, l: 36, xl: 56, xxl: 80, xxxl: 110 };
 
 const TRASH_DAYS = 30;
 

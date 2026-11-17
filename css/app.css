@@ -821,3 +821,12 @@ html, body { overscroll-behavior: none; }
 .blk-plus { position: absolute; z-index: 4; width: 28px; height: 28px; border-radius: 8px; align-items: center; justify-content: center;
   color: var(--muted); background: transparent; -webkit-user-select: none; user-select: none; }
 .blk-plus:active { background: var(--fill); color: var(--text); transform: scale(0.92); }
+
+/* ---- v36: 行間・余白のスライダー ---- */
+.step-slider { display: flex; align-items: center; gap: 10px; flex: 1; max-width: 340px; margin-left: 12px; position: relative; }
+.step-end { font-size: calc(13px * var(--ts)); white-space: nowrap; }
+.step-slider input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 28px; background: transparent; margin: 0; touch-action: pan-y; }
+.step-slider input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) var(--pct), var(--fill) var(--pct)); }
+.step-slider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; margin-top: -11px;
+  background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25), 0 0 0 0.5px rgba(0,0,0,.08); }

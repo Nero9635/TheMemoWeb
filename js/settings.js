@@ -9,6 +9,18 @@ import { ProfileAvatar, PersonaAvatar, ActionSheet, Linkified, TagPill, Sheet } 
 import { formatDay, formatTime, formatDateTime, TAG_COLORS } from './util.js';
 import { t, LANGUAGES } from './i18n.js';
 
+/** 段階のあるスライダー(行間・余白)。指を動かすとすぐ反映し、下の見本で確かめられる */
+function StepSlider({ label, keys, value, onChange, lo, hi }) {
+  const i = Math.max(0, keys.indexOf(value));
+  return html`<div class="step-slider">
+    <span class="step-end muted">${lo}</span>
+    <input type="range" min="0" max=${keys.length - 1} step="1" value=${i} aria-label=${label}
+      style=${`--pct:${(i / (keys.length - 1)) * 100}%`}
+      onInput=${(e) => { const k = keys[Number(e.target.value)]; if (k && k !== value) onChange(k); }} />
+    <span class="step-end muted">${hi}</span>
+  </div>`;
+}
+
 function Row({ icon, tint, label, value = '', onClick, chevron = true }) {
   return html`<button class="row" onClick=${onClick}>
     ${icon && html`<span class="row-icon" style=${`background:${tint}`}>${icon}</span>`}
@@ -81,9 +93,11 @@ export function Settings() {
         <div class="row"><span class="row-label">${t('writingFont')}</span>
           <${Segmented} label=${t('writingFont')} options=${[['default', t('fontDefault')], ['serif', html`<span class="serif-sample">${t('fontSerif')}</span>`]]} value=${s.writingFont} onChange=${(v) => S.updateSettings({ writingFont: v })} /></div>
         <div class="row"><span class="row-label">${t('lineSpacing')}</span>
-          <${Segmented} label=${t('lineSpacing')} options=${[['s', t('spacingTight')], ['m', t('spacingNormal')], ['l', t('spacingLoose')]]} value=${s.lineSpacing} onChange=${(v) => S.updateSettings({ lineSpacing: v })} /></div>
+          <${StepSlider} label=${t('lineSpacing')} keys=${Object.keys(S.LINE_SPACINGS)} value=${s.lineSpacing} onChange=${(v) => S.updateSettings({ lineSpacing: v })}
+            lo=${t('spacingTight')} hi=${t('spacingLoose')} /></div>
         <div class="row"><span class="row-label">${t('sideMargin')}</span>
-          <${Segmented} label=${t('sideMargin')} options=${[['s', t('marginNarrow')], ['m', t('marginNormal')], ['l', t('marginWide')]]} value=${s.editorMargin} onChange=${(v) => S.updateSettings({ editorMargin: v })} /></div>
+          <${StepSlider} label=${t('sideMargin')} keys=${Object.keys(S.EDITOR_MARGINS)} value=${s.editorMargin} onChange=${(v) => S.updateSettings({ editorMargin: v })}
+            lo=${t('marginNarrow')} hi=${t('marginWide')} /></div>
         <div class="spacing-preview" aria-hidden="true"><div class="spacing-sample">${t('spacingSample')}</div></div>
       </div>
 
@@ -109,7 +123,6 @@ export function Settings() {
       <div class="group-title">${t('writing')}</div>
       <div class="group">
         <${Row} label=${t('tags')} value=${String(st.tags.length)} onClick=${() => S.open({ name: 'tags' })} />
-        <${Row} label=${t('quickWords')} value=${String(st.quickWords.length)} onClick=${() => S.open({ name: 'words' })} />
       </div>
       <p class="hint">${t('writingHint')}</p>
 
