@@ -272,7 +272,8 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
   const normalize = () => {
     const el = root();
     const c = caret();
-    const keep = c ? { el: c.el, pos: c.pos } : null;
+    let keep = c ? { el: c.el, pos: c.pos } : null;
+    const sel = window.getSelection();
     let changed = false;
     const seen = new Set();
     for (const n of [...el.childNodes]) {
@@ -281,14 +282,32 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
         seen.add(n.dataset.id);
         continue;
       }
-      if (n.nodeType === 3 && !n.data.trim()) { n.remove(); continue; }
-      // 迷子の文字・<br>・ブラウザが作った div を段落にする
+      // 行の外に置かれた文字・<br>・ブラウザが作った div:
+      // 隣の行の中へ移す。カーソルがその中にあれば、打っていた位置をそのまま保つ
       const text = n.nodeType === 3 ? n.data : n.nodeName === 'BR' ? '' : textOf(n);
-      const nb = makeBlock(S.block('PARAGRAPH', text));
-      el.replaceChild(nb, n);
-      seen.add(nb.dataset.id);
+      const hasCaret = sel.rangeCount && (sel.anchorNode === n || n.contains?.(sel.anchorNode));
+      const caretInN = hasCaret ? (n.nodeType === 3 ? sel.anchorOffset : offsetIn(n, sel.anchorNode, sel.anchorOffset)) : 0;
+      const prev = n.previousSibling;
+      const next = n.nextSibling;
       changed = true;
-      if (keep && (keep.el === n || n.contains?.(keep.el))) keep.el = nb;
+      if (!text) { n.remove(); continue; }
+      if (prev && prev.nodeType === 1 && textBlock(prev)) {
+        const pt = readBlock(prev).text;
+        fillText(prev, pt + text, false);
+        n.remove();
+        if (hasCaret) keep = { el: prev, pos: pt.length + caretInN };
+      } else if (next && next.nodeType === 1 && textBlock(next)) {
+        const nt = readBlock(next).text;
+        fillText(next, text + nt, false);
+        n.remove();
+        if (hasCaret) keep = { el: next, pos: caretInN };
+      } else {
+        const nb = makeBlock(S.block('PARAGRAPH', text));
+        el.replaceChild(nb, n);
+        seen.add(nb.dataset.id);
+        if (hasCaret) keep = { el: nb, pos: caretInN };
+      }
+      if (hasCaret) placeCaret(keep.el, keep.pos);
     }
     // ブラウザが行の中に作った飾り(span・font など)は外して、文字だけに戻す
     for (const blk of el.children) {
@@ -432,6 +451,19 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       const type = e.inputType;
       if (type === 'historyUndo') { e.preventDefault(); undo(); return; }
       if (type === 'historyRedo') { e.preventDefault(); redo(); return; }
+      // カーソルが行の外(書ける面そのもの)にある時に打った文字は、近くの行の中へ入れる
+      const s0 = window.getSelection();
+      if (!e.isComposing && s0.rangeCount && s0.isCollapsed && s0.anchorNode === el
+        && (type === 'insertText' || type === 'insertReplacementText')) {
+        const c0 = caret();
+        if (c0 && textBlock(c0.el)) {
+          e.preventDefault();
+          placeCaret(c0.el, c0.pos);
+          const data = e.data ?? e.dataTransfer?.getData('text/plain') ?? '';
+          if (data) document.execCommand('insertText', false, data);
+          return;
+        }
+      }
       if (e.isComposing) return;
       const c = caret();
       if (!c) return;
@@ -648,6 +680,27 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       setMenuFor(blk.dataset.id);
     };
     const onSelection = () => {
+      // iPad は、行と行の間(書ける面そのもの)にカーソルを置くことがある。
+      // そのまま打つと文字が行の外に入るので、すぐに近くの行の中へ移す
+      const s = window.getSelection();
+      if (s.rangeCount && s.isCollapsed && s.anchorNode === el) {
+        const kids = el.children;
+        if (kids.length) {
+          const i = s.anchorOffset;
+          let target = kids[Math.min(i, kids.length - 1)];
+          let end = i >= kids.length;
+          if (!textBlock(target)) {
+            // 写真・区切り線のそばなら、いちばん近い文字の行へ
+            let up = target.previousElementSibling;
+            while (up && !textBlock(up)) up = up.previousElementSibling;
+            let down = target.nextElementSibling;
+            while (down && !textBlock(down)) down = down.nextElementSibling;
+            target = end ? (up ?? down) : (down ?? up);
+            end = target === up;
+          }
+          if (target) { placeCaret(target, end ? textOf(target).length : 0); return; }
+        }
+      }
       const c = caret();
       if (c) lastCaret.current = { id: c.el.dataset.id, pos: c.pos };
       if (slashRef.current && (!c || c.el.dataset.id !== slashRef.current.id)) setSlash(null);

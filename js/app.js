@@ -90,6 +90,40 @@ function noZoom() {
 }
 noZoom();
 
+/**
+ * 画面全体がずれる・跳ねるのを止める(iPad で強く上下にスクロールした時、キーボードが出ている時)。
+ * 指の下にスクロールできる箱があり、まだその向きに動ける時だけスクロールを許す。
+ * 箱の端でさらに引っぱった時や、スクロールできない所では、画面全体を動かさない
+ */
+function noPageBounce() {
+  let startX = 0;
+  let startY = 0;
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+    if (Math.abs(dx) > Math.abs(dy)) return; // 横のスクロール(書式の帯など)はそのまま
+    let n = e.target;
+    while (n && n !== document.body && n.nodeType === 1) {
+      const st = getComputedStyle(n);
+      if (/(auto|scroll)/.test(st.overflowY) && n.scrollHeight > n.clientHeight + 1) {
+        const atTop = n.scrollTop <= 0;
+        const atBottom = n.scrollTop + n.clientHeight >= n.scrollHeight - 1;
+        if ((dy > 0 && atTop) || (dy < 0 && atBottom)) e.preventDefault(); // 端でさらに引っぱった
+        return;
+      }
+      n = n.parentNode;
+    }
+    e.preventDefault(); // スクロールできる箱がない所では、画面全体を動かさない
+  }, { passive: false });
+}
+noPageBounce();
+
 // アプリを閉じる・ほかのアプリに切り替える時は、書きかけの変更をすぐ保存する
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') S.flushSaves(); });
 window.addEventListener('pagehide', () => S.flushSaves());
