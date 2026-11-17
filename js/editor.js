@@ -311,17 +311,8 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     markEmpty();
   };
 
-  /** カーソルが行の外(書ける面そのもの)にあれば、直前までいた行(なければ近くの行)の中へ戻す */
-  const pinCaret = () => {
-    const s = window.getSelection();
-    const el = root();
-    if (!el || !s.rangeCount || !s.isCollapsed || s.anchorNode !== el) return;
-    const lc = lastCaret.current;
-    const home = lc && byId(lc.id);
-    if (home && textBlock(home)) { placeCaret(home, Math.min(lc.pos, textOf(home).length)); return; }
-    const c = caret();
-    if (c && textBlock(c.el)) placeCaret(c.el, c.pos);
-  };
+  // 変換(日本語・ピンイン)の最中は true。この間はカーソルも文字も一切さわらない(ProseMirror と同じ原則)
+  const composing = useRef(false);
 
   /** 書ける面の中を、いつも「ブロックの並び」に保つ(ブラウザが直接文字や <br> を置いた時など) */
   const normalize = () => {
@@ -346,19 +337,9 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       const next = n.nextSibling;
       changed = true;
       if (!text) { n.remove(); continue; }
-      // いちばん確かなのは「直前までカーソルがあった行」。その位置に入れる
-      const lc = lastCaret.current;
-      const home = lc && byId(lc.id);
-      const isEmpty = (x) => x && x.nodeType === 1 && textBlock(x) && !readBlock(x).text;
-      if (home && textBlock(home)) {
-        const ht = readBlock(home).text;
-        const at = Math.min(lc.pos, ht.length);
-        fillText(home, ht.slice(0, at) + text + ht.slice(at), false);
-        n.remove();
-        if (hasCaret) keep = { el: home, pos: at + caretInN };
-        lastCaret.current = { id: lc.id, pos: at + text.length };
-      } else if (isEmpty(next) || (!isEmpty(prev) && next && next.nodeType === 1 && textBlock(next) && !(prev && prev.nodeType === 1 && textBlock(prev)))) {
-        // 空の行が下にあれば、その行に(打とうとしていたのはその行)
+      // 行と行の間の文字は、iPad がカーソルを「下の行の頭」として扱っていた所に入ったもの。
+      // 覚えていた位置ではなく、実際にある場所で決める: 下の行の頭へ(下に行がなければ上の行の末尾へ)
+      if (next && next.nodeType === 1 && textBlock(next)) {
         const nt = readBlock(next).text;
         fillText(next, text + nt, false);
         n.remove();
@@ -560,7 +541,7 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       const type = e.inputType;
       if (type === 'historyUndo') { e.preventDefault(); applyPending(); undo(); return; }
       if (type === 'historyRedo') { e.preventDefault(); applyPending(); redo(); return; }
-      if (e.isComposing || type === 'insertCompositionText') { applyPending(); pinCaret(); return; }
+      if (composing.current || e.isComposing || type === 'insertCompositionText' || type === 'insertFromComposition' || type === 'deleteCompositionText') return;
       applyPending();
       // カーソルが行の外(書ける面そのもの)にある時に打った文字は、近くの行の中へ入れる
       const s0 = window.getSelection();
@@ -712,14 +693,20 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
     const onInput = (e) => {
       // 行を組み替える操作のあと: iPad がキーを処理した直後に、正しい形に作り直す
       if (pending.current) { applyPending(); return; }
-      if (e.isComposing) { save(); return; }
+      if (composing.current || e.isComposing) { save(); return; }
       normalize();
       if (!shortcut()) save();
       markEmpty();
     };
-    const onCompositionEnd = () => setTimeout(() => { normalize(); if (!shortcut()) save(); markEmpty(); }, 0);
+    // 変換が決まった後で(Safari が続けて送る入力も終わってから)、はじめて行の形を整える
+    const onCompositionEnd = () => setTimeout(() => {
+      composing.current = false;
+      normalize();
+      if (!shortcut()) save();
+      markEmpty();
+    }, 0);
     // 変換が始まる前に、カーソルを必ず行の中に置く(行の外で変換が始まると、文字が別の行に入ってしまう)
-    const onCompositionStart = () => { applyPending(); pinCaret(); };
+    const onCompositionStart = () => { applyPending(); composing.current = true; };
     const onKeyUpDown = (e) => { shiftDown.current = e.shiftKey; };
     // 行頭の記号で形式を変える・「---」で区切り線・行頭の「/」でメニュー
     const shortcut = () => {
@@ -754,7 +741,7 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       return false;
     };
     const onKeyDown = (e) => {
-      if (e.isComposing || e.keyCode === 229) return;
+      if (composing.current || e.isComposing || e.keyCode === 229) return;
       const s = slashRef.current;
       if (s && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
         e.preventDefault();
@@ -803,7 +790,14 @@ export function BlockEditor({ memo, focusRef, onExitTop }) {
       // iPad は、行と行の間(書ける面そのもの)にカーソルを置くことがある。
       // そのまま打つと文字が行の外に入るので、すぐに近くの行の中へ移す
       const s = window.getSelection();
+      if (composing.current) {
+        const cc = caret();
+        if (cc) lastCaret.current = { id: cc.el.dataset.id, pos: cc.pos };
+        return;
+      }
       if (s.rangeCount && s.isCollapsed && s.anchorNode === el) {
+        const cm = caret();
+        if (cm) lastCaret.current = { id: cm.el.dataset.id, pos: cm.pos };
         const kids = el.children;
         if (kids.length) {
           const i = s.anchorOffset;
