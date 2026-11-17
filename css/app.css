@@ -789,3 +789,28 @@ html, body { overscroll-behavior: none; }
 .fmt-mark-italic { font-style: italic; }
 .fmt-mark-underline { text-decoration: underline; }
 .fmt-mark-strikethrough { text-decoration: line-through; }
+
+/* ---- v31: 道具の B と、その上に出る B / I / U ---- */
+.edit-bar-layer, .edit-bar, .mark-pop { touch-action: none; } /* 道具の上で指を動かしても、画面全体を引っぱらない */
+.eb-mark-wrap { position: relative; display: inline-flex; }
+.eb-b { font-family: var(--writing-font); font-size: calc(21px * var(--ts)); font-weight: 900; color: var(--text); line-height: 1; }
+.eb-b.on { background: var(--text); color: var(--bg); }
+.mark-pop { position: absolute; bottom: calc(100% + 12px); left: 50%; transform: translateX(-50%); z-index: 30;
+  display: inline-flex; gap: 4px; padding: 5px; border-radius: 999px;
+  background: var(--glass-bg); -webkit-backdrop-filter: blur(28px) saturate(180%); backdrop-filter: blur(28px) saturate(180%);
+  border: 0.5px solid var(--glass-border); box-shadow: var(--glass-shadow); animation: mark-pop-in 0.22s cubic-bezier(0.2, 0.9, 0.25, 1.15); transform-origin: bottom center; }
+@keyframes mark-pop-in { from { transform: translateX(-50%) scale(0.5); opacity: 0; } 60% { opacity: 1; } }
+.mark-btn { width: 44px; height: 40px; border-radius: 20px; display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--writing-font); font-size: calc(19px * var(--ts)); color: var(--text); }
+.mark-btn:active { transform: scale(0.92); }
+.mark-btn.on { background: var(--text); color: var(--bg); }
+.mark-bold { font-weight: 900; }
+.mark-italic { font-style: italic; font-weight: 600; }
+.mark-underline { text-decoration: underline; font-weight: 600; }
+/* 押している時: ライトは黒地に白、ダークは白地に黒 */
+.eb-b.on, .mark-btn.on { background: #000; color: #fff; }
+:root[data-theme="dark"] .eb-b.on, :root[data-theme="dark"] .mark-btn.on { background: #fff; color: #000; }
+@media (prefers-color-scheme: dark) { :root[data-theme="system"] .eb-b.on, :root[data-theme="system"] .mark-btn.on { background: #fff; color: #000; } }
+.eb-b { color: #000; }
+:root[data-theme="dark"] .eb-b { color: #fff; }
+@media (prefers-color-scheme: dark) { :root[data-theme="system"] .eb-b { color: #fff; } }

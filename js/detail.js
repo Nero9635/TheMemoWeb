@@ -29,6 +29,13 @@ export function Detail({ id, reply = false }) {
   const [mode, setMode] = useState(() => (memo && !reply && S.isBlank(memo) ? 'edit' : 'read'));
   const [pop, setPop] = useState(null); // {kind: 'more' | 'ai', rect}
   const [panel, setPanel] = useState(null); // 'format' | 'photo'
+  // 道具の B: 押すと、その上に B / I / U が出る
+  const [marksOpen, setMarksOpen] = useState(false);
+  const [markOn, setMarkOn] = useState({});
+  const readMarks = () => {
+    const q = (c) => { try { return document.queryCommandState(c); } catch { return false; } };
+    setMarkOn({ bold: q('bold'), italic: q('italic'), underline: q('underline') });
+  };
   const [tagSheet, setTagSheet] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
   const [focusKind, setFocusKind] = useState(null);
@@ -244,9 +251,18 @@ export function Detail({ id, reply = false }) {
     </div>
 
     <!-- 編集モードの道具: 本文とは別の層に置き、いつもキーボード(画面)のすぐ上に固定する -->
-    ${editing && focusKind !== 'reply' && html`<div class="edit-bar-layer">
+    ${editing && focusKind !== 'reply' && html`<div class="edit-bar-layer" ontouchmove=${(e) => e.preventDefault()}>
         <div class="edit-bar" role="toolbar" aria-label=${t('format')}>
-          <button class="eb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => openPanel('format')}><span class="aa">Aa</span></button>
+          <button class="eb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => { setMarksOpen(false); openPanel('format'); }}><span class="aa">Aa</span></button>
+          <span class="eb-mark-wrap">
+            <button class=${`eb-btn eb-b ${marksOpen ? 'on' : ''}`} aria-label=${t('textStyle')} aria-expanded=${marksOpen}
+              onMouseDown=${(e) => e.preventDefault()} onClick=${() => { if (!marksOpen) readMarks(); setMarksOpen(!marksOpen); }}>B</button>
+            ${marksOpen && html`<span class="mark-pop" role="group" aria-label=${t('textStyle')}>
+              ${[['bold', 'B', 'fmtBold'], ['italic', 'I', 'fmtItalic'], ['underline', 'U', 'fmtUnderline']].map(([cmd, label, key]) => html`<button
+                class=${`mark-btn mark-${cmd} ${markOn[cmd] ? 'on' : ''}`} aria-label=${t(key)} aria-pressed=${!!markOn[cmd]}
+                onMouseDown=${(e) => e.preventDefault()} onClick=${() => { editor.current.format?.(cmd); readMarks(); }}>${label}</button>`)}
+            </span>`}
+          </span>
           <button class="eb-btn" aria-label=${t('blockTodo')} onMouseDown=${(e) => e.preventDefault()}
             onClick=${() => setType(editor.current.currentType?.() === 'TODO' ? 'PARAGRAPH' : 'TODO')}>${Icon.checklist(22)}</button>
           <button class="eb-btn" aria-label=${t('photo')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => openPanel('photo')}>${Icon.photoCamera(22)}</button>
