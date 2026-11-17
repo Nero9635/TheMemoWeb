@@ -282,7 +282,9 @@ export function BlockEditor({ memo, focusRef }) {
   useLayoutEffect(() => {
     const el = document.createElement('div');
     el.className = 'ce';
-    el.contentEditable = 'true';
+    // 文字だけを書く面にする(iPad のキーボードの右上に B / I / U が出ない)。使えないブラウザでは今まで通り
+    try { el.contentEditable = 'plaintext-only'; } catch { /* 使えないブラウザ */ }
+    if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
     el.spellcheck = true;
     el.setAttribute('role', 'textbox');
     el.setAttribute('aria-multiline', 'true');
@@ -299,12 +301,17 @@ export function BlockEditor({ memo, focusRef }) {
   // ---- 入力の前: Return・行頭の Backspace・コードの改行を、その場で組み替える ----
   useEffect(() => {
     const el = root();
+    // 外付けキーボードの Shift(Shift + Return は行の中の改行のまま)
+    let shift = false;
+    const onShift = (e) => { shift = e.shiftKey; };
     const onBeforeInput = (e) => {
       if (e.isComposing) return;
       const c = caret();
       if (!c) return;
       const b = readBlock(c.el);
-      if (e.inputType === 'insertParagraph') {
+      // 文字だけの面では、iPad の Return が「改行」として来ることがある。今まで通り新しい行にする
+      const lineBreakAsEnter = e.inputType === 'insertLineBreak' && !shift && b.type !== 'CODE';
+      if (e.inputType === 'insertParagraph' || lineBreakAsEnter) {
         e.preventDefault();
         if (!c.collapsed) { document.execCommand('delete'); }
         const cc = caret();
@@ -432,6 +439,8 @@ export function BlockEditor({ memo, focusRef }) {
     el.addEventListener('input', onInput);
     el.addEventListener('compositionend', onCompositionEnd);
     el.addEventListener('keydown', onKeyDown);
+    el.addEventListener('keydown', onShift);
+    el.addEventListener('keyup', onShift);
     el.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('selectionchange', onSelection);
     vv?.addEventListener('resize', onResize);
@@ -440,6 +449,8 @@ export function BlockEditor({ memo, focusRef }) {
       el.removeEventListener('input', onInput);
       el.removeEventListener('compositionend', onCompositionEnd);
       el.removeEventListener('keydown', onKeyDown);
+      el.removeEventListener('keydown', onShift);
+      el.removeEventListener('keyup', onShift);
       el.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('selectionchange', onSelection);
       vv?.removeEventListener('resize', onResize);
