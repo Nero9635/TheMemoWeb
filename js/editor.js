@@ -436,16 +436,19 @@ function caretOffset(el) {
 function centerCaret(el, force) {
   const sc = el.closest('.scroll');
   if (!sc || document.activeElement !== el) return;
-  const scTop = sc.getBoundingClientRect().top;
-  const vh = window.visualViewport?.height ?? window.innerHeight;
-  const visible = Math.max(120, Math.min(sc.clientHeight, vh - scTop) - 60); // 下の道具の分を引く
-  const y = el.getBoundingClientRect().top + caretOffset(el) - scTop;
-  // 書いている行の下に、いつも約 8 行分の余白を残す(キーボード・道具の上)
+  const vv = window.visualViewport;
+  const r = sc.getBoundingClientRect();
+  // 実際に見えている下端(キーボードの上端)。iPad はキーボードで画面をずらすことがあるので offsetTop も足す
+  const viewBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  const tools = sc.querySelector('.tools-sticky')?.offsetHeight ?? 0;
+  const bottom = Math.min(r.bottom, viewBottom) - r.top - tools; // 道具のすぐ上(スクロールの箱の中の位置)
   const lh = parseFloat(getComputedStyle(el).lineHeight) || 30;
-  const target = Math.max(visible * 0.25, visible - lh * 8);
-  if (y > target + 4) { sc.scrollTop += y - target; return; }
+  const y = el.getBoundingClientRect().top + caretOffset(el) - r.top; // カーソルの行の真ん中
+  // 書いている行と道具の間は 2 行分だけ空ける。それより下に来たら、その分だけ上げる
+  const target = bottom - lh * 2.5;
+  if (y > target + 2) { sc.scrollTop += y - target; return; }
   // 上に隠れた時だけ下ろす(打っている時に画面が勝手に上下しないように)
-  if (y < Math.min(lh * 1.5, visible * 0.12)) sc.scrollTop += y - lh * 2;
+  if (y < lh * 1.5) sc.scrollTop += y - lh * 2;
 }
 
 let centerTimer = 0;

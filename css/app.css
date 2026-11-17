@@ -707,3 +707,11 @@ html, body { touch-action: pan-x pan-y; }
 /* ---- v16 ---- */
 /* 書いている間だけ下に足す余白: 最後の行の下にも 8 行分あけられるだけ */
 .type-space { height: calc(var(--ed-lh) * 19px * var(--ts) * 9); }
+
+/* ---- v18 ---- */
+/* 書いている間だけ下に足す余白: 最後の行も、道具の 2 行上まで上げられる分だけ */
+.type-space { height: calc(var(--ed-lh) * 19px * var(--ts) * 4); }
+/* 道具のカプセルをキーボードのすぐ上に(スクロールの箱の下の余白があると、その分浮いてしまう) */
+.scroll.detail { padding-bottom: 0; }
+.scroll.detail > .footnote { padding-bottom: 32px; }
+.tools-sticky { padding-bottom: 8px; }

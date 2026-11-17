@@ -371,3 +371,25 @@ export function Panel({ title, onClose, children }) {
     </div>
   </div>`;
 }
+
+/**
+ * iPad / iPhone で入力欄を押した時、キーボードに合わせて画面全体が一度上へずれてから戻る動きを止める。
+ * 押した瞬間だけ入力欄を画面の上の外へ動かしてからフォーカスすると、iOS は画面をずらさない。
+ * キーボードが出て画面の高さが合ったら(visualViewport の resize)元の位置に戻す
+ */
+export function focusWithoutSlide(el) {
+  if (!el || document.activeElement === el) return;
+  const vv = window.visualViewport;
+  let done = false;
+  const restore = () => {
+    if (done) return;
+    done = true;
+    vv?.removeEventListener('resize', onResize);
+    el.style.transform = '';
+  };
+  const onResize = () => requestAnimationFrame(() => requestAnimationFrame(restore));
+  el.style.transform = 'translateY(-200vh)';
+  el.focus({ preventScroll: true });
+  vv?.addEventListener('resize', onResize);
+  setTimeout(restore, 650); // キーボードが出ない時(外付けキーボードなど)
+}

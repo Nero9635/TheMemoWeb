@@ -5,7 +5,7 @@ import { Icon } from './icons.js';
 import { t, locale, formatMonthL, weekdayHeaders, formatMonthShortL } from './i18n.js';
 import {
   Img, ProfileAvatar, PersonaAvatar, AiAvatar, DateCapsule, TagPill, AutoText, ActionSheet,
-  TagSheet, usePostMenu, longPress, shareText, copyText, ReplyItem, tagColor, Linkified, StarButton,
+  TagSheet, usePostMenu, longPress, shareText, copyText, ReplyItem, tagColor, Linkified, StarButton, focusWithoutSlide,
 } from './ui.js';
 import { BlockView, toggleTodo } from './editor.js';
 import { addDays, dateKey, formatDay, formatTime, hostOf, findUrls, parseDateKey, todayKey, weekStartOf, haptic } from './util.js';
@@ -539,7 +539,13 @@ function Composer({ onTyping, onPosted }) {
       </div>`}
       <div class="compose-row">
         <button class=${`round ${tools ? 'on' : ''}`} aria-label=${tools ? t('closeTools') : t('addTools')} onClick=${() => setTools(!tools)}>${tools ? Icon.close() : Icon.plus()}</button>
-        <div class="field">
+        <div class="field" onTouchEnd=${(e) => {
+          // まだ入力していない時に押したら、画面をずらさずにキーボードを出す
+          const ta = e.currentTarget.querySelector('textarea');
+          if (!ta || document.activeElement === ta) return;
+          e.preventDefault();
+          focusWithoutSlide(ta);
+        }}>
           <${AutoText} value=${text} onInput=${setText} placeholder=${t('write')} label=${t('writeLabel')} maxRows=${6} class="field-input" onSubmit=${send} />
         </div>
         <button class=${`round send ${canSend ? 'ready' : ''}`} aria-label=${t('send')} disabled=${!canSend} onClick=${send}>${Icon.send()}</button>

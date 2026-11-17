@@ -70,7 +70,7 @@ function fitViewport() {
   const set = () => {
     const h = vv ? vv.height : window.innerHeight;
     document.documentElement.style.setProperty('--app-h', `${h}px`);
-    if (vv) window.scrollTo(0, 0);
+    if (vv && (window.scrollY || vv.offsetTop)) window.scrollTo(0, 0);
   };
   set();
   vv?.addEventListener('resize', set);
