@@ -781,3 +781,11 @@ html, body { touch-action: pan-x pan-y; }
 html, body { overscroll-behavior: none; }
 /* v27: 切り分けのため、いったん外している  body { position: fixed; inset: 0; width: 100%; } */
 .scroll, .feed, .sheet, .panel, .pop-menu, .slash-menu, .alert-scroll { overscroll-behavior: contain; }
+
+/* ---- v30: 文字の書式(太字・斜体・下線・取り消し線) ---- */
+.ce b, .ce strong, .bview b { font-weight: 700; }
+.fmt-mark { font-size: calc(18px * var(--ts)); font-family: var(--writing-font); color: var(--text); }
+.fmt-mark-bold { font-weight: 800; }
+.fmt-mark-italic { font-style: italic; }
+.fmt-mark-underline { text-decoration: underline; }
+.fmt-mark-strikethrough { text-decoration: line-through; }

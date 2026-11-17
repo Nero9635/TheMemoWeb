@@ -158,6 +158,11 @@ const D = {
   ],
   writeDiary: ['Write about today…', '今日のことを書く…', '写写今天…'],
   slashHint: ['Type “/” for commands', '「/」でメニュー', '输入“/”打开菜单'],
+  textStyle: ['Text style', '文字の書式', '文字样式'],
+  fmtBold: ['Bold', '太字', '粗体'],
+  fmtItalic: ['Italic', '斜体', '斜体'],
+  fmtUnderline: ['Underline', '下線', '下划线'],
+  fmtStrike: ['Strikethrough', '取り消し線', '删除线'],
   // ---- v15 ----
   fmtTitle: ['Title', 'タイトル', '标题'],
   fmtHeading: ['Heading', '見出し', '小标题'],

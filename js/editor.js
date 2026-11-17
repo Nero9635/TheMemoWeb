@@ -47,6 +47,86 @@ function fillText(el, text, links) {
   if (!text || text.endsWith('\n')) el.appendChild(document.createElement('br'));
 }
 
+// ---------- 行の中の書式(太字・斜体・下線・取り消し線) ----------
+// 書式は block.rich に、b / i / u / s / br だけの HTML で持つ(本文の文字は今まで通り block.text)。
+// Android 版は知らない項目を読み飛ばすので、文字はそのまま読める
+
+const MARK_TAGS = { B: 'b', STRONG: 'b', I: 'i', EM: 'i', U: 'u', S: 's', STRIKE: 's', DEL: 's' };
+const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** span などに付いた書式(太字・斜体など)を、タグの名前に直す */
+function styleMarks(n) {
+  const st = n.style;
+  if (!st) return [];
+  const out = [];
+  const w = st.fontWeight;
+  if (w === 'bold' || w === 'bolder' || Number(w) >= 600) out.push('b');
+  if (st.fontStyle === 'italic') out.push('i');
+  const deco = `${st.textDecoration} ${st.textDecorationLine}`;
+  if (deco.includes('underline')) out.push('u');
+  if (deco.includes('line-through')) out.push('s');
+  return out;
+}
+
+/** 行の中身を、書式のタグだけの HTML にする。書式が一つもなければ '' */
+function richOf(el) {
+  let has = false;
+  const ser = (node) => {
+    let out = '';
+    for (const n of node.childNodes) {
+      if (n.nodeType === 3) out += escHtml(n.data);
+      else if (n.nodeName === 'BR') out += '<br>';
+      else if (n.nodeType === 1) {
+        const block = /^(DIV|P|LI)$/.test(n.nodeName);
+        if (block && out && !out.endsWith('<br>')) out += '<br>';
+        let inner = ser(n);
+        const tags = MARK_TAGS[n.nodeName] ? [MARK_TAGS[n.nodeName]] : styleMarks(n);
+        if (inner && tags.length) { has = true; for (const tg of tags) inner = `<${tg}>${inner}</${tg}>`; }
+        out += inner;
+        if (block && !out.endsWith('<br>')) out += '<br>';
+      }
+    }
+    return out;
+  };
+  let html = ser(el);
+  if (html.endsWith('<br>')) html = html.slice(0, -4); // 高さ用の最後の <br>
+  return has ? html : '';
+}
+
+/** rich の HTML を、決まったタグだけで組み立て直して入れる。文字が text と合わなければ使わない */
+function fillRich(el, rich, text) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = rich;
+  const build = (from, to) => {
+    for (const n of from.childNodes) {
+      if (n.nodeType === 3) to.appendChild(document.createTextNode(n.data));
+      else if (n.nodeName === 'BR') to.appendChild(document.createElement('br'));
+      else if (n.nodeType === 1) {
+        const tg = MARK_TAGS[n.nodeName];
+        if (tg) { const m = document.createElement(tg); build(n, m); to.appendChild(m); } else build(n, to);
+      }
+    }
+  };
+  const box = document.createElement('div');
+  build(tpl.content, box);
+  if (textOf(box) !== text) { fillText(el, text, false); return; }
+  el.textContent = '';
+  while (box.firstChild) el.appendChild(box.firstChild);
+  if (!text || text.endsWith('\n')) el.appendChild(document.createElement('br'));
+}
+
+/** タイムラインなどに出す、安全な書式つきの HTML(書式がなければ null) */
+export function richHtml(b) {
+  if (!b.rich) return null;
+  const d = document.createElement('div');
+  fillRich(d, b.rich, b.text);
+  if (d.lastChild && d.lastChild.nodeName === 'BR') d.lastChild.remove();
+  return d.innerHTML;
+}
+
+/** 文字だけの行を、rich と同じ形の HTML に(行をつなぐ時に使う) */
+const richOrPlain = (b) => b.rich || escHtml(b.text).replace(/\n/g, '<br>');
+
 /** 閲覧モード: URL と #ハッシュタグ を押せるようにする */
 function appendLinked(el, line) {
   for (const part of splitLinks(line)) {
@@ -88,6 +168,8 @@ function makeBlock(b, links = false) {
   } else if (b.type === 'DIVIDER') {
     el.contentEditable = 'false';
     el.appendChild(document.createElement('hr'));
+  } else if (b.rich) {
+    fillRich(el, b.rich, b.text);
   } else {
     fillText(el, b.text, links);
   }
@@ -122,7 +204,34 @@ function readBlock(el) {
     checked: el.classList.contains('checked'),
     image: el.dataset.image || '',
     comment: el.dataset.comment || '',
+    ...(type !== 'DIVIDER' && type !== 'IMAGE' && richOf(el) ? { rich: richOf(el) } : {}),
   };
+}
+
+/** 行の中の、文字の位置 a〜b の部分(書式つき) */
+function partOf(el, a, b) {
+  const full = textOf(el);
+  const text = full.slice(a, b);
+  const p = pointAt(el, a);
+  const q = pointAt(el, b);
+  const r = document.createRange();
+  r.setStart(p.node, p.offset);
+  r.setEnd(q.node, q.offset);
+  // 1 つの太字などの中だけを写す時、ブラウザは外側の書式を写さないので、外側の書式で包み直す
+  let frag = r.cloneContents();
+  let anc = r.commonAncestorContainer;
+  if (anc.nodeType === 3) anc = anc.parentNode;
+  for (let n = anc; n && n !== el; n = n.parentNode) {
+    const tg = MARK_TAGS[n.nodeName];
+    if (!tg) continue;
+    const wrap = document.createElement(tg);
+    wrap.appendChild(frag);
+    frag = wrap;
+  }
+  const d = document.createElement('div');
+  d.appendChild(frag);
+  const rich = richOf(d);
+  return rich ? { text, rich } : { text };
 }
 
 // ---------- カーソル(文字の位置で扱う。<br> は1文字) ----------
@@ -141,31 +250,36 @@ function offsetIn(blockEl, node, offset) {
   return n;
 }
 
-/** 文字数の位置にカーソルを置く */
-function placeCaret(blockEl, pos) {
-  const sel = window.getSelection();
-  const r = document.createRange();
+/** 文字数の位置を、ノード + オフセット に直す */
+function pointAt(blockEl, pos) {
   let left = pos;
-  let done = false;
+  let found = null;
   const walk = (x) => {
     for (const c of x.childNodes) {
-      if (done) return;
+      if (found) return;
       if (c.nodeType === 3) {
-        if (left <= c.data.length) { r.setStart(c, left); done = true; return; }
+        if (left <= c.data.length) { found = { node: c, offset: left }; return; }
         left -= c.data.length;
       } else if (c.nodeName === 'BR') {
-        if (left === 0) { r.setStartBefore(c); done = true; return; }
+        if (left === 0) { found = { node: c.parentNode, offset: [...c.parentNode.childNodes].indexOf(c) }; return; }
         left -= 1;
       } else walk(c);
     }
   };
   walk(blockEl);
-  if (!done) {
-    // 最後: 高さ用の <br> があればその前に
-    const last = blockEl.lastChild;
-    if (last && last.nodeName === 'BR') r.setStartBefore(last);
-    else r.setStart(blockEl, blockEl.childNodes.length);
-  }
+  if (found) return found;
+  // 最後: 高さ用の <br> があればその前に
+  const last = blockEl.lastChild;
+  if (last && last.nodeName === 'BR') return { node: blockEl, offset: blockEl.childNodes.length - 1 };
+  return { node: blockEl, offset: blockEl.childNodes.length };
+}
+
+/** 文字数の位置にカーソルを置く */
+function placeCaret(blockEl, pos) {
+  const sel = window.getSelection();
+  const r = document.createRange();
+  const p = pointAt(blockEl, pos);
+  r.setStart(p.node, p.offset);
   r.collapse(true);
   sel.removeAllRanges();
   sel.addRange(r);
@@ -232,12 +346,16 @@ export function BlockEditor({ memo, focusRef }) {
       changed = true;
       if (keep && (keep.el === n || n.contains?.(keep.el))) { keep.el = nb; }
     }
-    // ブラウザが行の中に作った飾り(span・font など)は外して、文字だけに戻す
+    // 行の中: 太字・斜体・下線・取り消し線(b / i / u / s)はそのまま残す。
+    // それ以外の飾り(span・font・中の div など)がある時だけ、書式を保って整え直す
     for (const blk of el.children) {
       if (!TEXT_TYPES.includes(blk.dataset.type)) continue;
-      if (![...blk.childNodes].some((n) => n.nodeType === 1 && n.nodeName !== 'BR')) continue;
+      const odd = [...blk.querySelectorAll('*')].some((n) => n.nodeName !== 'BR' && !MARK_TAGS[n.nodeName]);
+      if (!odd) continue;
       const isCaret = keep && keep.el === blk;
-      fillText(blk, textOf(blk), false);
+      const text = textOf(blk);
+      const rich = richOf(blk);
+      if (rich) fillRich(blk, rich, text); else fillText(blk, text, false);
       if (isCaret) placeCaret(blk, Math.min(keep.pos, textOf(blk).length));
     }
     if (!el.children.length) {
@@ -316,17 +434,18 @@ export function BlockEditor({ memo, focusRef }) {
           replace([cc.el], [{ ...cur, type: 'PARAGRAPH', checked: false }], { id: cur.id, pos: 0 });
           return;
         }
-        const before = cur.text.slice(0, cc.pos);
-        const after = cur.text.slice(cc.pos);
+        const before = partOf(cc.el, 0, cc.pos);
+        const after = partOf(cc.el, cc.pos, cur.text.length);
         const nextType = LIST_TYPES.includes(cur.type) ? cur.type : 'PARAGRAPH';
-        if (!before && after) {
+        if (!before.text && after.text) {
           // 行頭で Return: 上に空の行を足し、今の行はそのまま
           const empty = S.block(nextType);
           replace([cc.el], [empty, cur], { id: cur.id, pos: 0 });
           return;
         }
-        const nb = S.block(nextType, after);
-        replace([cc.el], [{ ...cur, text: before }, nb], { id: nb.id, pos: 0 });
+        const { rich: _r, ...curPlain } = cur;
+        const nb = { ...S.block(nextType, after.text), ...(after.rich ? { rich: after.rich } : {}) };
+        replace([cc.el], [{ ...curPlain, text: before.text, ...(before.rich ? { rich: before.rich } : {}) }, nb], { id: nb.id, pos: 0 });
         return;
       }
       if (e.inputType === 'deleteContentBackward' && c.collapsed && c.pos === 0) {
@@ -352,8 +471,10 @@ export function BlockEditor({ memo, focusRef }) {
           save();
           return;
         }
-        // 前の行とつなぐ
-        replace([prev, c.el], [{ ...p, text: p.text + b.text }], { id: p.id, pos: p.text.length });
+        // 前の行とつなぐ(書式もいっしょに)
+        const merged = { ...p, text: p.text + b.text };
+        if (p.rich || b.rich) merged.rich = richOrPlain(p) + richOrPlain(b); else delete merged.rich;
+        replace([prev, c.el], [merged], { id: p.id, pos: p.text.length });
       }
     };
     const onInput = (e) => {
@@ -384,7 +505,9 @@ export function BlockEditor({ memo, focusRef }) {
         const m = b.text.match(re);
         if (!m || !/\s$|・$/.test(m[0]) || c.pos !== m[0].length) continue;
         const kind = type === 'TODO_DONE' ? 'TODO' : type;
-        replace([c.el], [{ ...b, type: kind, checked: type === 'TODO_DONE', text: b.text.slice(m[0].length) }], { id: b.id, pos: 0 });
+        const rest = partOf(c.el, m[0].length, b.text.length);
+        const { rich: _r, ...plain } = b;
+        replace([c.el], [{ ...plain, type: kind, checked: type === 'TODO_DONE', text: rest.text, ...(rest.rich ? { rich: rest.rich } : {}) }], { id: b.id, pos: 0 });
         return true;
       }
       return false;
@@ -467,8 +590,43 @@ export function BlockEditor({ memo, focusRef }) {
   const focusRoot = () => { root()?.focus({ preventScroll: true }); };
 
   // 外から(道具・フォーマット・写真・ワード)操作する
+  // 最後に選んでいた範囲(フォーマットのパネルを開くと選択が外れるので、覚えておく)
+  const lastRange = useRef(null);
+  useEffect(() => {
+    const onSel = () => {
+      const s = window.getSelection();
+      if (!s.rangeCount || !root()?.contains(s.anchorNode)) return;
+      const r = s.getRangeAt(0);
+      const a = blockOf(r.startContainer);
+      const z = blockOf(r.endContainer);
+      if (!a || !z) return;
+      lastRange.current = { a: a.dataset.id, ap: offsetIn(a, r.startContainer, r.startOffset), z: z.dataset.id, zp: offsetIn(z, r.endContainer, r.endOffset) };
+    };
+    document.addEventListener('selectionchange', onSel);
+    return () => document.removeEventListener('selectionchange', onSel);
+  }, []);
+
   focusRef.current = {
     currentType: () => currentEl()?.dataset.type ?? null,
+    /** 太字・斜体・下線・取り消し線(選んだ文字に。何も選んでいなければ、これから打つ文字に) */
+    format: (cmd) => {
+      const lr = lastRange.current;
+      const a = lr && byId(lr.a);
+      const z = lr && byId(lr.z);
+      root()?.focus({ preventScroll: true });
+      if (a && z) {
+        const p = pointAt(a, lr.ap);
+        const q = pointAt(z, lr.zp);
+        const r = document.createRange();
+        r.setStart(p.node, p.offset);
+        r.setEnd(q.node, q.offset);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+      document.execCommand(cmd);
+      save();
+    },
     refocus: () => {
       const lc = lastCaret.current;
       const el = lc && byId(lc.id);
@@ -622,7 +780,8 @@ export function BlockView({ memo, onToggle, images = false }) {
       if (b.type === 'DIVIDER') return html`<hr class="bv-divider" />`;
       if (b.type === 'IMAGE') return html`<${Img} name=${b.image} class="media-img bv-img" />`;
       if (!b.text && b.type === 'PARAGRAPH') return null;
-      const text = html`<${Linkified} text=${b.text} />`;
+      const rh = richHtml(b);
+      const text = rh ? html`<span dangerouslySetInnerHTML=${{ __html: rh }}></span>` : html`<${Linkified} text=${b.text} />`;
       switch (b.type) {
         case 'HEADING1': return html`<div class="bv-h1">${text}</div>`;
         case 'HEADING2': return html`<div class="bv-h2">${text}</div>`;

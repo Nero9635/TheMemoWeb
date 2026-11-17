@@ -266,6 +266,13 @@ export function Detail({ id, reply = false }) {
           onMouseDown=${(e) => e.preventDefault()} onClick=${() => setType(type)}>${t(key)}</button>`)}
       </div>
       <div class="fmt-groups">
+        <div class="fmt-group" role="group" aria-label=${t('textStyle')}>
+          ${[['bold', 'B', 'fmtBold'], ['italic', 'I', 'fmtItalic'], ['underline', 'U', 'fmtUnderline'], ['strikeThrough', 'S', 'fmtStrike']].map(([cmd, label, key]) => html`<button
+            class=${`fmt-btn fmt-mark fmt-mark-${cmd.toLowerCase()}`} aria-label=${t(key)} title=${t(key)}
+            onMouseDown=${(e) => e.preventDefault()} onClick=${() => editor.current.format?.(cmd)}>${label}</button>`)}
+        </div>
+      </div>
+      <div class="fmt-groups">
         <div class="fmt-group" role="group" aria-label=${t('fmtList')}>
           ${[['BULLET', Icon.listBullet(22)], ['NUMBERED', Icon.listNumber(22)], ['TODO', Icon.checklist(22)]].map(([type, icon]) => html`<button
             class=${`fmt-btn ${curType === type ? 'on' : ''}`} aria-label=${TYPE_LABEL()[type]} aria-pressed=${curType === type} title=${TYPE_LABEL()[type]}

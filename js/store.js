@@ -191,7 +191,7 @@ function newMemo(fields) {
 export function normalizeMemo(m) {
   const memo = newMemo({});
   Object.assign(memo, m);
-  memo.blocks = (m.blocks ?? []).map((b) => ({ id: b.id ?? uuid(), type: b.type ?? 'PARAGRAPH', text: b.text ?? '', checked: !!b.checked, image: b.image ?? '', comment: b.comment ?? '' }));
+  memo.blocks = (m.blocks ?? []).map((b) => ({ id: b.id ?? uuid(), type: b.type ?? 'PARAGRAPH', text: b.text ?? '', checked: !!b.checked, image: b.image ?? '', comment: b.comment ?? '', ...(typeof b.rich === 'string' && b.rich ? { rich: b.rich } : {}) }));
   memo.tags = m.tags ?? [];
   memo.chat = m.chat ?? [];
   memo.starred = !!m.starred;
