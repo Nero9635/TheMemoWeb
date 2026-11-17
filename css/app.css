@@ -715,3 +715,16 @@ html, body { touch-action: pan-x pan-y; }
 .scroll.detail { padding-bottom: 0; }
 .scroll.detail > .footnote { padding-bottom: 32px; }
 .tools-sticky { padding-bottom: 8px; }
+
+/* ---- v20: 道具は別の層に。入力中は本文の下を隠す ---- */
+.tools-sticky { display: none; }
+.edit-bar-layer { position: absolute; left: 0; right: 0; bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 20;
+  display: flex; justify-content: center; pointer-events: none; }
+.screen.typing .edit-bar-layer { bottom: 8px; } /* キーボードの上ではホームバーの余白はいらない */
+.edit-bar-layer .edit-bar { pointer-events: auto; }
+/* 編集モード: 一番下まで読んでも道具に隠れないように */
+.scroll.detail.editing { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+/* 入力中: 最後の行の下は「2 行分 + 道具」だけ。下までスクロールしても大きな空白はできない */
+.scroll.detail.typing { padding-bottom: calc(66px + var(--ed-lh) * 19px * var(--ts) * 2); }
+.scroll.detail.typing .blocks { min-height: 0; }
+.type-space { display: none; }

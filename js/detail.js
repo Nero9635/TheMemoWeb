@@ -31,6 +31,8 @@ export function Detail({ id, reply = false }) {
   const [panel, setPanel] = useState(null); // 'format' | 'photo'
   const [tagSheet, setTagSheet] = useState(false);
   const [editorKey, setEditorKey] = useState(0);
+  const [focusKind, setFocusKind] = useState(null);
+  const blurTimer = useRef(null);
   const [, force] = useState(0);
   const photoInput = useRef();
   const cameraInput = useRef();
@@ -55,6 +57,8 @@ export function Detail({ id, reply = false }) {
   const busy = st.busy?.memoId === id ? st.busy.task : null;
   const author = S.authorOf(p, memo.aiCommentBy ?? '', memo.aiCommentIcon ?? '');
   const editing = mode === 'edit';
+  // 入力中(フォーマットや写真のパネルを開いている間も含む)
+  const typing = editing && (focusKind === 'editor' || !!panel);
   // 本文を外から書き換えた時(AI の文章を足すなど)は、エディタを作り直して新しい中身を見せる
   const rebuild = () => setEditorKey((k) => k + 1);
   const append = (text) => { S.appendText(id, text); rebuild(); };
@@ -112,10 +116,18 @@ export function Detail({ id, reply = false }) {
     ],
   ];
 
+  // どこに書いているか: 本文・タイトル(editor)/ 返信欄(reply)
+  const kindOf = (el) => (!el ? null : el.closest?.('.reply-compose') ? 'reply'
+    : el.closest?.('.blocks') || el.classList?.contains('title-input') ? 'editor' : null);
+  const onFocusIn = (e) => { clearTimeout(blurTimer.current); setFocusKind(kindOf(e.target)); };
+  const onFocusOut = () => {
+    clearTimeout(blurTimer.current);
+    blurTimer.current = setTimeout(() => setFocusKind(kindOf(document.activeElement)), 120);
+  };
   const curType = panel === 'format' ? editor.current.currentType?.() : null;
   const setType = (type) => { editor.current.setType(type); setTimeout(() => force((n) => n + 1), 30); };
 
-  return html`<div class="screen">
+  return html`<div class=${`screen ${typing ? 'typing' : ''}`}>
     <${NavBar} title=${memo.allDay ? t('diary') : t('post')} right=${html`
       <div class="mode-switch glass-group" role="radiogroup" aria-label=${t('mode')}>
         <button class=${`mode-btn ${editing ? 'on' : ''}`} role="radio" aria-checked=${editing} aria-label=${t('editMode')} onClick=${() => setMode('edit')}>${Icon.edit(18)}</button>
@@ -123,7 +135,7 @@ export function Detail({ id, reply = false }) {
       </div>
       <button class="glass-icon nav-more" aria-label=${t('more')} aria-haspopup="menu" onClick=${openPop('more')}>${busy ? html`<span class="spinner"></span>` : Icon.more(18)}</button>`} />
 
-    <div class=${`scroll detail ${editing ? 'editing' : 'reading'}`}>
+    <div class=${`scroll detail ${editing ? 'editing' : 'reading'} ${typing ? 'typing' : ''}`} onfocusin=${onFocusIn} onfocusout=${onFocusOut}>
       <div class="detail-head">
         <${ProfileAvatar} size=${44} />
         <div class="flex"><div class="name-lg">${st.settings.profileName}</div>
@@ -147,29 +159,19 @@ export function Detail({ id, reply = false }) {
 
       ${editing
         ? html`<${BlockEditor} key=${editorKey} memo=${memo} focusRef=${editor} />
-          <button class="tap-to-write" aria-label=${t('write')} onClick=${() => editor.current.focusEnd()}></button>`
+          ${!typing && html`<button class="tap-to-write" aria-label=${t('write')} onClick=${() => editor.current.focusEnd()}></button>`}`
         : html`<div class="read-body" onDblClick=${() => setMode('edit')}>
             ${S.isBlank(memo) ? html`<p class="muted read-empty">${t('nothingYet')}</p>`
               : html`<${BlockStatic} memo=${memo} onToggle=${(bid) => toggleTodo(memo, bid)} />`}
           </div>`}
 
+      <!-- 入力中は本文の下のもの(ボタン・更新日時・返信)を隠す。最後の行の下は道具と 2 行分の余白だけになる -->
+      ${!typing && html`<div class="below-text">
       ${(urls.length > 0 || hashtags.length > 0) && html`<div class="pills pad">
         ${urls.map((u) => html`<a class="link-chip" href=${u} target="_blank" rel="noopener">${Icon.link(14)} ${hostOf(u)}</a>`)}
         ${hashtags.map((h) => html`<button class="link-chip hashtag-chip" onClick=${() => S.open({ name: 'search', q: `#${h}` })}>#${h}</button>`)}
       </div>`}
       ${(memo.place || memo.weather || memo.steps != null) && html`<div class="meta-line muted">${[memo.place, memo.weather, memo.steps != null ? t('steps', { n: memo.steps }) : ''].filter(Boolean).join(' · ')}</div>`}
-
-      <!-- 編集モードの道具: 中央の小さなガラスのカプセル。スクロールしても下に残る -->
-      ${editing && html`<div class="tools-sticky">
-        <div class="edit-bar" role="toolbar" aria-label=${t('format')}>
-          <button class="eb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => openPanel('format')}><span class="aa">Aa</span></button>
-          <button class="eb-btn" aria-label=${t('blockTodo')} onMouseDown=${(e) => e.preventDefault()}
-            onClick=${() => setType(editor.current.currentType?.() === 'TODO' ? 'PARAGRAPH' : 'TODO')}>${Icon.checklist(22)}</button>
-          <button class="eb-btn" aria-label=${t('photo')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => openPanel('photo')}>${Icon.photoCamera(22)}</button>
-          <span class="eb-sep" aria-hidden="true"></span>
-          <button class="eb-btn" aria-label=${t('hideKeyboard')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => editor.current.blur?.()}>${Icon.keyboardDown(22)}</button>
-        </div>
-      </div>`}
 
       <div class="detail-actions">
         <button class=${`act ${thread ? 'on' : ''}`} aria-label=${t('reply')} aria-expanded=${thread} onClick=${() => setThread(!thread)}>
@@ -231,7 +233,21 @@ export function Detail({ id, reply = false }) {
       </div>`}
       </div>`}
       <p class="footnote">${t('updated', { d: formatDateTime(memo.updatedAt) })}</p>
+      </div>`}
     </div>
+
+    <!-- 編集モードの道具: 本文とは別の層に置き、いつもキーボード(画面)のすぐ上に固定する -->
+    ${editing && focusKind !== 'reply' && html`<div class="edit-bar-layer">
+        <div class="edit-bar" role="toolbar" aria-label=${t('format')}>
+          <button class="eb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => openPanel('format')}><span class="aa">Aa</span></button>
+          <button class="eb-btn" aria-label=${t('blockTodo')} onMouseDown=${(e) => e.preventDefault()}
+            onClick=${() => setType(editor.current.currentType?.() === 'TODO' ? 'PARAGRAPH' : 'TODO')}>${Icon.checklist(22)}</button>
+          <button class="eb-btn" aria-label=${t('photo')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => openPanel('photo')}>${Icon.photoCamera(22)}</button>
+          <span class="eb-sep" aria-hidden="true"></span>
+          <button class="eb-btn" aria-label=${t('hideKeyboard')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => editor.current.blur?.()}>${Icon.keyboardDown(22)}</button>
+        </div>
+      </div>`}
+
 
     <input ref=${photoInput} type="file" accept="image/*" multiple hidden onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
     <input ref=${cameraInput} type="file" accept="image/*" capture="environment" hidden onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />

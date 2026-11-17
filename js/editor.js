@@ -409,7 +409,6 @@ export function BlockEditor({ memo, focusRef }) {
       { divider: true },
       { label: t('deleteBlock'), danger: true, onClick: () => focusRef.current.removeCurrent() },
     ]} />`}
-    ${typing && html`<div class="type-space" aria-hidden="true"></div>`}
   </div>`;
 }
 
@@ -440,8 +439,10 @@ function centerCaret(el, force) {
   const r = sc.getBoundingClientRect();
   // 実際に見えている下端(キーボードの上端)。iPad はキーボードで画面をずらすことがあるので offsetTop も足す
   const viewBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
-  const tools = sc.querySelector('.tools-sticky')?.offsetHeight ?? 0;
-  const bottom = Math.min(r.bottom, viewBottom) - r.top - tools; // 道具のすぐ上(スクロールの箱の中の位置)
+  // 道具のカプセル(別の層)の上端。なければ見えている下端
+  const bar = document.querySelector('.edit-bar-layer .edit-bar');
+  const barTop = bar ? bar.getBoundingClientRect().top : Math.min(r.bottom, viewBottom);
+  const bottom = Math.min(barTop, viewBottom, r.bottom) - r.top; // 道具のすぐ上(スクロールの箱の中の位置)
   const lh = parseFloat(getComputedStyle(el).lineHeight) || 30;
   const y = el.getBoundingClientRect().top + caretOffset(el) - el.scrollTop - r.top; // カーソルの行の真ん中
   // 書いている行と道具の間は 2 行分だけ空ける
