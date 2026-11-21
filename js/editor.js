@@ -359,13 +359,26 @@ export function BlockEditor({ memo, focusRef, onBlockMenu }) {
     const keep = c ? { el: c.el, pos: c.pos } : null;
     let changed = false;
     const seen = new Set();
+    // v38: iPad のキーボードは、書いている間に行の外(面の直下)へ空の <br> や空の div を置くことがある。
+    // これを行にすると、文章の下に空の行がたまっていく。カーソルが中にない空のものは、行にせず捨てる
+    const sel = window.getSelection();
+    const an = sel.rangeCount ? sel.anchorNode : null;
+    const rootNear = an === el ? [el.childNodes[sel.anchorOffset - 1], el.childNodes[sel.anchorOffset]] : [];
     for (const n of [...el.childNodes]) {
       if (n.nodeType === 1 && n.classList.contains('blk') && n.dataset.id) {
-        if (seen.has(n.dataset.id)) { n.dataset.id = S.block().id; changed = true; }
+        if (seen.has(n.dataset.id)) {
+          // 同じ行の写し(ブラウザが行を複製したもの)。空でカーソルもなければ捨てる
+          if (!textOf(n) && !(an && (n === an || n.contains(an))) && TEXT_TYPES.includes(n.dataset.type)) { n.remove(); changed = true; continue; }
+          n.dataset.id = S.block().id; changed = true;
+        }
         seen.add(n.dataset.id);
         continue;
       }
       if (n.nodeType === 3 && !n.data.trim() && n.data !== ' ') { n.remove(); continue; }
+      // カーソルが面そのものの上(この空のものの前後)にある時も、そこで書いているので残す
+      const atRoot = rootNear.includes(n);
+      const hasCaret = atRoot || (an && (n === an || n.contains?.(an)));
+      if (!hasCaret && n.nodeType === 1 && !textOf(n) && !n.querySelector?.('img')) { n.remove(); changed = true; continue; }
       // 迷子の文字・<br>・ブラウザが作った div を段落にする
       const text = n.nodeType === 3 ? n.data : n.nodeName === 'BR' ? '' : textOf(n);
       const nb = makeBlock(S.block('PARAGRAPH', text));
@@ -434,7 +447,11 @@ export function BlockEditor({ memo, focusRef, onBlockMenu }) {
     el.setAttribute('aria-multiline', 'true');
     el.setAttribute('autocapitalize', 'sentences');
     el.dataset.placeholder = t('whatsHappening');
-    const blocks = memo.blocks.length ? memo.blocks : [S.block()];
+    // v38: 以前のバグでたまった、文章の最後の空の行を片付けて開く(1 行は残す)
+    const src = [...memo.blocks];
+    const isEmptyLine = (b) => b && b.type === 'PARAGRAPH' && !b.text && !b.rich && !b.align && !b.comment;
+    while (src.length > 1 && isEmptyLine(src[src.length - 1]) && isEmptyLine(src[src.length - 2])) src.pop();
+    const blocks = src.length ? src : [S.block()];
     blocks.forEach((b) => el.appendChild(makeBlock(b)));
     el.classList.toggle('blank', blocks.length === 1 && blocks[0].type === 'PARAGRAPH' && !blocks[0].text);
     host.current.appendChild(el);

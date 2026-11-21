@@ -8,6 +8,15 @@ import {
   TagSheet, usePostMenu, longPress, shareText, copyText, ReplyItem, tagColor, Linkified, StarButton, focusWithoutSlide,
 } from './ui.js';
 import { BlockView, toggleTodo } from './editor.js';
+import { TodoSection, TodoAddButton, TodoRing } from './todo.js';
+
+/** カレンダーの輪: その日だけのリスト + 繰り返すリスト(今日まで。先の日は予定なので出さない) */
+function ringOf(date, d, today) {
+  const a = d?.todo ?? { done: 0, total: 0 };
+  const b = date <= today ? S.repeatProgress(date) : { done: 0, total: 0 };
+  const total = a.total + b.total;
+  return total ? { done: a.done + b.done, total } : null;
+}
 import { addDays, dateKey, formatDay, formatTime, hostOf, findUrls, parseDateKey, todayKey, weekStartOf, haptic } from './util.js';
 
 /** タイムラインの並び: 日付の見出し → その日の投稿(日記が先頭)→ その日のまとめ */
@@ -38,7 +47,7 @@ function dayInfo(memos, notes) {
     const imgs = S.memoImages(m);
     d.photos += imgs.length;
     if (!d.firstPhoto && imgs.length) d.firstPhoto = imgs[0];
-    if (m.allDay) { d.diary = true; if (m.mood) d.mood = m.mood; }
+    if (m.allDay) { d.diary = true; if (m.mood) d.mood = m.mood; const pr = S.todoProgress(m); if (pr.total) d.todo = pr; }
     if (m.starred) d.starred = true;
     m.tags.forEach((tg) => { if (!d.tags.includes(tg)) d.tags.push(tg); });
   }
@@ -99,6 +108,7 @@ export function Home() {
     if (!el) return undefined;
     const ro = new ResizeObserver(() => { if (stick.current) scrollToEnd(); });
     ro.observe(el.firstElementChild);
+    ro.observe(el); // キーボードが出て見える高さが変わった時も、最新に張り付いたまま
     const release = () => { stick.current = false; };
     el.addEventListener('touchstart', release, { passive: true });
     el.addEventListener('wheel', release, { passive: true });
@@ -197,7 +207,16 @@ export function Home() {
     </div>
     ${!atEnd && html`<button class="latest glass" onClick=${goToday}>${Icon.chevronDown(14)} ${t('latest')}</button>`}
 
-    <${Composer} onTyping=${setTyping} onPosted=${() => { stick.current = true; S.setState({ selected: today }); setWeekStart(weekStartOf(today)); }} />
+    <${Composer} onTyping=${(on) => {
+      setTyping(on);
+      // 入力欄を押したら、今日の最新の投稿を入力欄のすぐ上に見せる(キーボードが出きった後にも合わせ直す)
+      if (on) {
+        stick.current = true;
+        if (S.state.selected !== today) { S.setState({ selected: today }); setWeekStart(weekStartOf(today)); }
+        requestAnimationFrame(scrollToEnd);
+        setTimeout(() => { if (stick.current) scrollToEnd(); }, 350);
+      }
+    }} onPosted=${() => { stick.current = true; S.setState({ selected: today }); setWeekStart(weekStartOf(today)); }} />
     ${menu.view}
   </div>`;
 }
@@ -249,7 +268,7 @@ function WeekStrip({ week, today, selected, info, onPick, onPrev, onNext, onExpa
         aria-label=${dayLabel(date, d)} aria-current=${date === today ? 'date' : undefined} onClick=${() => onPick(date)}>
         <span class="num">${Number(date.slice(8))}</span>
         <${Dots} d=${d} />
-        <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${d?.starred && html`<i class="mark star" aria-hidden="true">★</i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
+        <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${ringOf(date, d, today) && html`<${TodoRing} ...${ringOf(date, d, today)} />`}${d?.starred && html`<i class="mark star" aria-hidden="true">★</i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
       </button>`;
     })}
   </div>`;
@@ -284,7 +303,7 @@ function MonthGrid({ month, today, selected, info, onMonth, onPick }) {
             <${Dots} d=${d} />
             ${d?.posts > 1 && html`<span class="count">${d.posts}</span>`}
           </span>
-          <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${d?.starred && html`<i class="mark star" aria-hidden="true">★</i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
+          <span class="marks">${d?.diary && (d.mood ? html`<i class="mark mood" aria-hidden="true">${S.moodEmoji(d.mood)}</i>` : html`<i class="mark diary" aria-hidden="true"></i>`)}${ringOf(date, d, today) && html`<${TodoRing} ...${ringOf(date, d, today)} />`}${d?.starred && html`<i class="mark star" aria-hidden="true">★</i>`}${d?.ai && html`<i class="mark ai" aria-hidden="true">✦</i>`}</span>
         </button>`;
       })}
     </div>
@@ -332,8 +351,10 @@ function DaySection({ day, today, menu }) {
       ${day.date === today && html`<span class="today-label">${t('today')}</span>`}
       <span class="flex"></span>
       <button class="glass-icon small" aria-label=${t('aiForDay')} disabled=${busy} onClick=${() => setAiOpen(true)}>${busy ? html`<span class="spinner"></span>` : Icon.sparkle(16)}</button>
+      <${TodoAddButton} memoId=${() => S.diaryFor(day.date).id} date=${day.date} className="glass-icon small" label=${false} />
       <button class="pill-btn glass small" onClick=${() => { const d = S.diaryFor(day.date); S.open({ name: 'detail', id: d.id }); }}>${t('diary')}</button>
     </div>
+    ${!day.posts.some((m) => m.allDay) && html`<${TodoSection} date=${day.date} variant="day" />`}
     ${day.posts.map((m) => (m.allDay ? html`<${DiaryCard} key=${m.id} memo=${m} menu=${menu} />` : html`<${Post} key=${m.id} memo=${m} menu=${menu} />`))}
     ${(note || busy) && html`<div class="day-review">
       ${(note?.summary || (busy && !st.dayBusy.jung)) && html`<${ReplyItem} avatar=${html`<${AiAvatar} />`} name=${t('daySummary')} meta=${formatDay(day.date)} line=${false}
@@ -436,6 +457,7 @@ function DiaryCard({ memo, menu }) {
       <span class="diary-date">${date.toLocaleDateString(locale(), { weekday: 'long' })}</span>
       ${memo.starred && html`<span class="head-star" aria-label=${t('starred')}>★</span>`}
       <span class="flex"></span>
+      <${TodoAddButton} memoId=${memo.id} date=${S.memoDate(memo)} className="diary-mood diary-todo" label=${false} />
       <button class=${`diary-mood ${memo.mood ? 'set' : ''}`} aria-label=${memo.mood ? `${t('mood')}: ${S.moodLabel(memo.mood)}` : t('mood')}
         onClick=${(e) => { e.stopPropagation(); menu.openMood(memo); }}>
         ${memo.mood ? html`<span class="mood-emoji">${S.moodEmoji(memo.mood)}</span>${S.moodLabel(memo.mood)}` : html`<span class="mood-emoji faint">☺︎</span>`}
@@ -443,6 +465,7 @@ function DiaryCard({ memo, menu }) {
       <button class="icon-btn small muted" aria-label=${t('more')} onClick=${(e) => { e.stopPropagation(); menu.openMenu(memo); }}>${Icon.more()}</button>
     </div>
     ${memo.title.trim() && html`<div class="diary-title"><${Linkified} text=${memo.title} /></div>`}
+    <${TodoSection} memo=${memo} variant="card" />
     ${memo.body.trim() && html`<div ref=${bodyRef} class=${`post-body diary-body ${expanded ? '' : 'folded'} ${overflow && !expanded ? 'fade' : ''}`}>
       <${BlockView} memo=${memo} onToggle=${(id) => toggleTodo(memo, id)} /></div>`}
     <${FoldButton} overflow=${overflow} expanded=${expanded} setExpanded=${setExpanded} cardRef=${cardRef} />

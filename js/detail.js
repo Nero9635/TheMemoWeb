@@ -8,6 +8,7 @@ import {
   usePostMenu, ReplyItem, copyText, shareText, StarButton, PopMenu, Panel,
 } from './ui.js';
 import { BlockEditor, BlockStatic, TYPE_LABEL, toggleTodo } from './editor.js';
+import { TodoSection, TodoAddButton } from './todo.js';
 import { findUrls, formatDateTime, formatTime, hostOf } from './util.js';
 
 const lastMine = (memo) => memo.chat.map((c) => c.fromUser).lastIndexOf(true);
@@ -125,6 +126,7 @@ export function Detail({ id, reply = false }) {
 
   // どこに書いているか: 本文・タイトル(editor)/ 返信欄(reply)
   const kindOf = (el) => (!el ? null : el.closest?.('.reply-compose') ? 'reply'
+    : el.closest?.('.todo-sec') ? 'todo'
     : el.closest?.('.ce') || el.classList?.contains('title-input') ? 'editor' : null);
   const onFocusIn = (e) => { clearTimeout(blurTimer.current); setFocusKind(kindOf(e.target)); };
   const onFocusOut = () => {
@@ -150,6 +152,7 @@ export function Detail({ id, reply = false }) {
           <div class="muted small-text">${memo.allDay ? t('diary') : `${formatTime(memo.createdAt)} · `}${memo.allDay ? '' : yearL(memo.createdAt)}</div></div>
         ${memo.allDay && html`<button class=${`mood-chip ${memo.mood ? 'set' : ''}`} aria-label=${t('mood')} onClick=${() => menu.openMood(memo)}>
           ${memo.mood ? html`<span class="mood-emoji">${S.moodEmoji(memo.mood)}</span>${S.moodLabel(memo.mood)}` : html`<span class="mood-emoji faint">☺︎</span>${t('mood')}`}</button>`}
+        ${memo.allDay && !(memo.todos?.length) && !S.repeatsOn(S.memoDate(memo)).length && html`<${TodoAddButton} memoId=${memo.id} date=${S.memoDate(memo)} className="mood-chip todo-chip" />`}
         <${DateCapsule} date=${S.memoDate(memo)} small time=${memo.allDay ? '' : formatTime(memo.createdAt)}
           label=${memo.allDay ? t('changeDate') : t('changeTime')} onClick=${() => menu.openTime(memo)} />
       </div>
@@ -169,6 +172,9 @@ export function Detail({ id, reply = false }) {
         ${memo.tags.map((tg) => html`<${TagPill} name=${tg} onClick=${() => setTagSheet(true)} />`)}
         ${editing && html`<button class="tag-add" onClick=${() => setTagSheet(true)}>${Icon.tag(14)} ${memo.tags.length ? t('edit') : t('addTag')}</button>`}
       </div>`}
+
+      <!-- To-do: 日記のタイトルと本文の間(編集モードでも閲覧モードでも、書いてチェックできる) -->
+      ${memo.allDay && html`<${TodoSection} memo=${memo} variant="detail" showAdd=${true} />`}
 
       ${editing
         ? html`<${BlockEditor} key=${editorKey} memo=${memo} focusRef=${editor} onBlockMenu=${() => openPanel('format')}
@@ -251,7 +257,7 @@ export function Detail({ id, reply = false }) {
     </div>
 
     <!-- 編集モードの道具: 本文とは別の層に置き、いつもキーボード(画面)のすぐ上に固定する -->
-    ${editing && focusKind !== 'reply' && html`<div class="edit-bar-layer" ontouchmove=${(e) => e.preventDefault()}>
+    ${editing && focusKind !== 'reply' && focusKind !== 'todo' && html`<div class="edit-bar-layer" ontouchmove=${(e) => e.preventDefault()}>
         <div class="edit-bar" role="toolbar" aria-label=${t('format')}>
           <button class="eb-btn" aria-label=${t('format')} onMouseDown=${(e) => e.preventDefault()} onClick=${() => { setMarksOpen(false); openPanel('format'); }}><span class="aa">Aa</span></button>
           <span class="eb-mark-wrap">

@@ -5,6 +5,7 @@ const svg = (size, body, fill = false) => html`<svg width=${size} height=${size}
   fill=${fill ? 'currentColor' : 'none'} stroke=${fill ? 'none' : 'currentColor'} stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 
 export const Icon = {
+  repeat: (s = 16) => svg(s, html`<path d="M4 11V9.5A3.5 3.5 0 0 1 7.5 6H19M16 3l3 3-3 3"/><path d="M20 13v1.5a3.5 3.5 0 0 1-3.5 3.5H5M8 21l-3-3 3-3"/>`),
   alignLeft: (s = 22) => svg(s, html`<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>`),
   alignCenter: (s = 22) => svg(s, html`<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>`),
   alignRight: (s = 22) => svg(s, html`<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>`),

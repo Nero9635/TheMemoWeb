@@ -172,7 +172,202 @@ export function memoDate(memo) {
 }
 
 export function isBlank(memo) {
-  return !memo.title.trim() && !memo.body.trim() && memoImages(memo).length === 0 && !memo.mood;
+  return !memo.title.trim() && !memo.body.trim() && memoImages(memo).length === 0 && !memo.mood && !(memo.todos?.length);
+}
+
+// ---- To-do リスト(日記に付く。気分と同じく、その日のもの) ----
+/** 選べるアイコン(icons.js の名前)と色 */
+export const TODO_ICONS = ['list', 'check', 'star', 'heart', 'cart', 'work', 'home', 'book', 'run', 'pill', 'leaf', 'sun', 'moon', 'gift', 'plane', 'flag'];
+export const TODO_COLORS = { blue: '#0a84ff', red: '#ff453a', orange: '#ff9f0a', yellow: '#ffcc00', green: '#30d158', teal: '#40c8e0', indigo: '#5e5ce6', purple: '#bf5af2', pink: '#ff375f', gray: '#8e8e93' };
+
+function normalizeTodos(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((l) => l && typeof l === 'object').map((l) => ({
+    id: typeof l.id === 'string' ? l.id : uuid(),
+    title: typeof l.title === 'string' ? l.title : '',
+    icon: TODO_ICONS.includes(l.icon) ? l.icon : 'list',
+    color: TODO_COLORS[l.color] ? l.color : 'blue',
+    items: (Array.isArray(l.items) ? l.items : []).filter((i) => i && typeof i === 'object')
+      .map((i) => ({ id: typeof i.id === 'string' ? i.id : uuid(), text: typeof i.text === 'string' ? i.text : '', done: !!i.done })),
+  }));
+}
+
+/** 日記の To-do リストを書き換える(打つたびに呼ばれる時は delay で書き込みをまとめる) */
+export function updateTodos(memoId, fn, delay = 0) {
+  return updateMemo(memoId, (m) => ({ ...m, todos: fn(m.todos ?? []) }), delay);
+}
+
+export function todoItem(text = '') {
+  return { id: uuid(), text, done: false };
+}
+
+/** 新しいリストを足す。from を渡すと、その中身(未チェックに戻して)を写す */
+export function addTodoList(memoId, { title = '', icon = 'list', color = 'blue', items = [] } = {}) {
+  const list = { id: uuid(), title, icon, color, items: items.length ? items.map((i) => todoItem(i.text)) : [todoItem()] };
+  updateTodos(memoId, (ls) => [...ls, list]);
+  return list;
+}
+
+/** これまでに作ったリスト(名前ごとに一番新しいもの)。「前のリストから」使い回すため */
+export function savedTodoLists(excludeMemoId = null) {
+  const seen = new Map();
+  [...activeMemos()].sort((a, b) => b.createdAt - a.createdAt).forEach((m) => {
+    if (m.id === excludeMemoId) return;
+    (m.todos ?? []).forEach((l) => {
+      const key = l.title.trim() || null;
+      if (!key || seen.has(key)) return;
+      seen.set(key, l);
+    });
+  });
+  return [...seen.values()].slice(0, 12);
+}
+
+// ---- 繰り返す To-do リスト(v40) ----
+// 決まった日(毎日・平日・毎週・毎月・毎年)に、その日の欄へ自動で出るリスト。
+// 中身(項目)はリストに 1 つだけ持ち、チェックは日ごとに done[日付] = [項目の id] で覚える。
+// repeat: { kind: 'daily'|'weekdays'|'weekly'|'monthly'|'yearly', days: [0..6](毎週の曜日) }
+// start: この日から / end: この日まで(繰り返しをやめた時。なければずっと)
+export const REPEAT_KINDS = ['none', 'daily', 'weekdays', 'weekly', 'monthly', 'yearly'];
+
+function normalizeRepeat(r) {
+  const kind = REPEAT_KINDS.includes(r?.kind) && r.kind !== 'none' ? r.kind : 'daily';
+  const days = [...new Set((Array.isArray(r?.days) ? r.days : []).map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+  return { kind, days };
+}
+const isKey = (k) => typeof k === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(k);
+
+function normalizeTodoDef(l) {
+  const base = normalizeTodos([l])[0];
+  const done = {};
+  if (l && typeof l.done === 'object' && l.done) {
+    for (const [k, ids] of Object.entries(l.done)) if (isKey(k) && Array.isArray(ids)) done[k] = ids.filter((x) => typeof x === 'string');
+  }
+  return {
+    ...base,
+    items: base.items.map(({ id, text }) => ({ id, text })),
+    repeat: normalizeRepeat(l?.repeat),
+    start: isKey(l?.start) ? l.start : todayKey(),
+    end: isKey(l?.end) ? l.end : null,
+    done,
+  };
+}
+export function normalizeTodoDefs(list) {
+  return Array.isArray(list) ? list.filter((l) => l && typeof l === 'object').map(normalizeTodoDef) : [];
+}
+
+const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
+
+/** この繰り返しのリストは、その日に出るか */
+export function occursOn(def, key) {
+  if (!def || !isKey(key) || key < def.start || (def.end && key > def.end)) return false;
+  // 作った日(始まりの日)には必ず出す: 土曜に「平日」のリストを作っても、作ったその日から消えないように
+  if (key === def.start) return true;
+  const d = parseDateKey(key);
+  const s = parseDateKey(def.start);
+  const dow = d.getDay();
+  switch (def.repeat.kind) {
+    case 'daily': return true;
+    case 'weekdays': return dow >= 1 && dow <= 5;
+    case 'weekly': return (def.repeat.days.length ? def.repeat.days : [s.getDay()]).includes(dow);
+    case 'monthly': return d.getDate() === Math.min(s.getDate(), daysInMonth(d.getFullYear(), d.getMonth()));
+    case 'yearly': return d.getMonth() === s.getMonth() && d.getDate() === Math.min(s.getDate(), daysInMonth(d.getFullYear(), d.getMonth()));
+    default: return false;
+  }
+}
+
+/** その日に出る繰り返しのリスト */
+export function repeatsOn(key) {
+  return state.todoLists.filter((l) => occursOn(l, key));
+}
+
+/** 表示用: その日のチェックを items[].done に入れた形 */
+export function repeatView(def, key) {
+  const done = new Set(def.done[key] ?? []);
+  return { ...def, items: def.items.map((i) => ({ ...i, done: done.has(i.id) })) };
+}
+
+let defsTimer = null;
+function saveDefs(delay = 0) {
+  clearTimeout(defsTimer);
+  if (delay) defsTimer = setTimeout(() => db.set('todoLists', state.todoLists), delay);
+  else db.set('todoLists', state.todoLists);
+  emit();
+}
+
+export function updateTodoDef(id, fn, delay = 0) {
+  state.todoLists = state.todoLists.map((l) => (l.id === id ? normalizeTodoDef(fn(l)) : l));
+  saveDefs(delay);
+}
+
+/** 表示用の項目(done 付き)を書き換える関数 fn を、その日について当てる: 中身はリストへ、チェックはその日へ */
+export function updateRepeatItems(id, key, fn, delay = 0) {
+  updateTodoDef(id, (l) => {
+    const next = fn(repeatView(l, key).items);
+    const done = { ...l.done };
+    const ids = next.filter((i) => i.done).map((i) => i.id);
+    if (ids.length) done[key] = ids; else delete done[key];
+    return { ...l, items: next.map(({ id: iid, text }) => ({ id: iid, text })), done };
+  }, delay);
+}
+
+export function addTodoDef({ title = '', icon = 'list', color = 'blue', items = [], repeat, start, done = {} }) {
+  const def = normalizeTodoDef({ id: uuid(), title, icon, color, items: items.length ? items : [todoItem()], repeat, start, end: null, done });
+  state.todoLists = [...state.todoLists, def];
+  saveDefs();
+  return def;
+}
+
+export function deleteTodoDef(id) {
+  state.todoLists = state.todoLists.filter((l) => l.id !== id);
+  saveDefs();
+}
+
+/** 日記の(その日だけの)リストを、繰り返すリストにする。その日のチェックはそのまま */
+export function makeRepeating(memoId, listId, repeat, patch = {}) {
+  const memo = getMemo(memoId);
+  const list = memo?.todos?.find((l) => l.id === listId);
+  if (!list) return null;
+  const key = memoDate(memo);
+  const ids = list.items.filter((i) => i.done).map((i) => i.id);
+  const def = addTodoDef({ ...list, ...patch, items: list.items.map(({ id, text }) => ({ id, text })), repeat, start: key, done: ids.length ? { [key]: ids } : {} });
+  updateTodos(memoId, (ls) => ls.filter((l) => l.id !== listId));
+  return def;
+}
+
+/** 繰り返しをやめる: その日までは残し(チェックの記録も)、次の日からは出さない */
+export function stopRepeating(id, key) {
+  updateTodoDef(id, (l) => ({ ...l, end: key < l.start ? l.start : key }));
+}
+
+/** 繰り返しの説明(「毎週 月・水」など) */
+export function repeatLabel(def) {
+  const r = def.repeat;
+  const s = parseDateKey(def.start);
+  switch (r.kind) {
+    case 'daily': return t('repeatDaily');
+    case 'weekdays': return t('repeatWeekdays');
+    case 'weekly': return `${t('repeatWeekly')} ${(r.days.length ? r.days : [s.getDay()]).map((d) => t('dowShort')[d]).join('・')}`;
+    case 'monthly': return t('repeatMonthlyOn', { d: s.getDate() });
+    case 'yearly': return t('repeatYearlyOn', { m: s.getMonth() + 1, d: s.getDate() });
+    default: return '';
+  }
+}
+
+/** その日の、繰り返すリストの進み具合 */
+export function repeatProgress(key) {
+  let done = 0;
+  let total = 0;
+  for (const l of repeatsOn(key)) {
+    const ids = new Set(l.done[key] ?? []);
+    for (const i of l.items) { if (!i.text.trim()) continue; total += 1; if (ids.has(i.id)) done += 1; }
+  }
+  return { done, total };
+}
+
+/** その日の進み具合(全部のリストを合わせて) */
+export function todoProgress(memo) {
+  const items = (memo?.todos ?? []).flatMap((l) => l.items.filter((i) => i.text.trim()));
+  return { done: items.filter((i) => i.done).length, total: items.length };
 }
 
 export function replyCount(memo) {
@@ -196,6 +391,7 @@ export function normalizeMemo(m) {
   memo.tags = m.tags ?? [];
   memo.chat = m.chat ?? [];
   memo.starred = !!m.starred;
+  memo.todos = normalizeTodos(m.todos);
   if (!memo.body && memo.blocks.length) memo.body = toPlainText(memo.blocks);
   return memo;
 }
@@ -209,6 +405,7 @@ export const state = {
   tags: [],
   quickWords: DEFAULT_WORDS.en.map((text) => ({ text, uses: 0 })),
   dayNotes: {},
+  todoLists: [], // 繰り返す To-do リスト
   busy: null, // {memoId, task}
   dayBusy: null, // {date, jung}
   reviewBusy: false,
@@ -245,8 +442,8 @@ export function say(message) {
 }
 
 export async function init() {
-  const [memos, settings, tags, words, notes] = await Promise.all([
-    db.allMemos(), db.get('settings'), db.get('tags'), db.get('quickWords'), db.get('dayNotes'),
+  const [memos, settings, tags, words, notes, todoLists] = await Promise.all([
+    db.allMemos(), db.get('settings'), db.get('tags'), db.get('quickWords'), db.get('dayNotes'), db.get('todoLists').catch(() => null),
   ]);
   const limit = Date.now() - TRASH_DAYS * 86400000;
   const all = (memos ?? []).map(normalizeMemo);
@@ -265,6 +462,7 @@ export async function init() {
   if (!tags) db.set('tags', state.tags);
   state.quickWords = words ?? DEFAULT_WORDS[state.settings.language].map((text) => ({ text, uses: 0 }));
   state.dayNotes = notes ?? {};
+  state.todoLists = normalizeTodoDefs(todoLists);
   versions = (await db.get('versions').catch(() => null)) ?? {};
   state.ready = true;
   emit();
@@ -873,7 +1071,7 @@ export async function autoSnapshot(reason) {
   const list = (await db.get('snapshots').catch(() => null)) ?? [];
   if (reason === 'daily' && list.some((x) => x.reason === 'daily' && dateKey(x.at) === todayKey())) return;
   if (!state.memos.length) return;
-  const snap = { at: Date.now(), reason, count: activeMemos().length, memos: JSON.parse(JSON.stringify(state.memos)), dayNotes: state.dayNotes };
+  const snap = { at: Date.now(), reason, count: activeMemos().length, memos: JSON.parse(JSON.stringify(state.memos)), dayNotes: state.dayNotes, todoLists: JSON.parse(JSON.stringify(state.todoLists)) };
   // 古いものから消す。ただし毎日の控えを少なくとも 5 つは残す
   let next = [snap, ...list];
   while (next.length > MAX_SNAPSHOTS) {
@@ -913,5 +1111,11 @@ export async function restoreSnapshot(at) {
   const notes = { ...(snap.dayNotes ?? {}), ...state.dayNotes };
   state.dayNotes = notes;
   await db.set('dayNotes', notes);
+  // 繰り返す To-do: 控えにあって今ないリストを戻す(今あるリストはそのまま)
+  if (Array.isArray(snap.todoLists)) {
+    const have = new Set(state.todoLists.map((l) => l.id));
+    state.todoLists = [...state.todoLists, ...normalizeTodoDefs(snap.todoLists).filter((l) => !have.has(l.id))];
+    await db.set('todoLists', state.todoLists);
+  }
   setState({ editorRev: (state.editorRev ?? 0) + 1, message: t('snapshotRestored', { n: changed.length }) });
 }

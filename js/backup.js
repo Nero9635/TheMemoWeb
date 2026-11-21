@@ -1,7 +1,7 @@
 // バックアップ(zip)。中身の形は Android 版と同じなので、どちらのバックアップも読み込める
 /* global JSZip */
 import { db } from './db.js';
-import { state, normalizeMemo, memoImages, setState, say, autoSnapshot, flushSaves, updateSettings } from './store.js';
+import { state, normalizeMemo, normalizeTodoDefs, memoImages, setState, say, autoSnapshot, flushSaves, updateSettings } from './store.js';
 import { todayKey } from './util.js';
 import { t } from './i18n.js';
 
@@ -40,6 +40,7 @@ export async function buildZip({ memos = state.memos, full = false, includeApiKe
   zip.file('tags.json', JSON.stringify(state.tags));
   zip.file('quick_words.json', JSON.stringify(state.quickWords));
   zip.file('day_notes.json', JSON.stringify(dayNotes));
+  zip.file('todo_lists.json', JSON.stringify(state.todoLists));
   if (full) zip.file('settings.json', JSON.stringify(settingsJson(includeApiKey)));
   const names = new Set(memos.flatMap(memoImages));
   if (full) [state.settings.profileImage, state.settings.persona.image].filter(Boolean).forEach((n) => names.add(n));
@@ -142,6 +143,18 @@ export async function restore(file) {
   }
   state.dayNotes = merged;
   await db.set('dayNotes', merged);
+  // 繰り返す To-do リスト: 新しいリストは足し、同じリストはチェックの記録を合わせる
+  const defs = normalizeTodoDefs((await read('todo_lists.json')) ?? []);
+  const byDef = new Map(state.todoLists.map((l) => [l.id, l]));
+  for (const d of defs) {
+    const cur = byDef.get(d.id);
+    if (!cur) { byDef.set(d.id, d); continue; }
+    const done = { ...d.done };
+    for (const [k, ids] of Object.entries(cur.done)) done[k] = [...new Set([...(done[k] ?? []), ...ids])];
+    byDef.set(d.id, { ...cur, done });
+  }
+  state.todoLists = [...byDef.values()];
+  await db.set('todoLists', state.todoLists);
   const message = t('restored', { n: memos.length });
   const settings = await read('settings.json');
   setState({ pendingSettings: settings ? { settings, message } : null, message: settings ? null : message });
